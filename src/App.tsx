@@ -72,6 +72,7 @@ export default function App() {
 
   // État réseau multijoueur + chat diplomatique
   const socketRef = useRef<Socket | null>(null);
+  const [socketNonce, setSocketNonce] = useState(0);
   const [connected, setConnected] = useState(false);
   const [mySocketId, setMySocketId] = useState<string | null>(null);
   const [room, setRoom] = useState<RoomSummary | null>(null);
@@ -157,7 +158,7 @@ export default function App() {
       setConnected(false);
       setMySocketId(null);
     };
-  }, [shouldConnectSocket]);
+  }, [shouldConnectSocket, socketNonce]);
 
   // Effacement automatique des alertes d'action
   useEffect(() => {
@@ -331,23 +332,24 @@ export default function App() {
   // --- ÉCRAN D'ACCUEIL : SOLO OU MULTIJOUEUR ---
   if (!state) {
     return (
-      <div className="flex min-h-screen w-screen flex-col items-center justify-center bg-stone-950 p-4 text-amber-50 font-sans overflow-y-auto">
-        <div className="w-full max-w-4xl rounded-xl border border-amber-200/30 bg-stone-900/95 p-6 shadow-2xl">
+      <div className="flex min-h-dvh w-full flex-col items-center justify-start sm:justify-center bg-stone-950 p-3 pb-12 sm:p-4 text-amber-50 font-sans overflow-y-auto touch-pan-y">
+        <div className="w-full max-w-4xl rounded-xl border border-amber-200/30 bg-stone-900/95 p-4 sm:p-6 shadow-2xl">
           <div className="text-center">
-            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-amber-400">
+            <p className="text-[11px] sm:text-xs font-semibold uppercase tracking-[0.2em] sm:tracking-[0.25em] text-amber-400">
               Stratégie Compétitive • Sans Pay-to-Win
             </p>
-            <h1 className="mt-1 font-serif text-3xl sm:text-4xl font-bold text-amber-100">
+            <h1 className="mt-1 font-serif text-2xl sm:text-4xl font-bold text-amber-100">
               1914 : L’EUROPE EN FLAMMES
             </h1>
-            <p className="mt-2 text-sm text-stone-300">
+            <p className="mt-1 text-xs sm:text-sm text-stone-300">
               Mode Blitz (30 min max • Mobilisation 2m30 • 65 régions)
             </p>
           </div>
 
           {/* Sélecteur Solo / Multijoueur */}
-          <div className="mx-auto mt-5 grid max-w-md grid-cols-2 rounded-lg border border-stone-700 bg-stone-950 p-1 text-xs font-bold">
+          <div className="mx-auto mt-3.5 sm:mt-5 grid max-w-md grid-cols-2 rounded-lg border border-stone-700 bg-stone-950 p-1 text-xs font-bold">
             <button
+              type="button"
               onClick={() => {
                 setLobbyTab('solo');
                 setRoom(null);
@@ -363,6 +365,7 @@ export default function App() {
               Solo (vs 7 IA)
             </button>
             <button
+              type="button"
               onClick={() => {
                 setLobbyTab('online');
                 soundEngine.playSelect();
@@ -380,12 +383,13 @@ export default function App() {
 
           {lobbyTab === 'solo' ? (
             <>
-              <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="mt-4 sm:mt-6 grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4 sm:gap-3">
                 {PLAYABLE_NATIONS.map((id) => {
                   const tpl = NATION_TEMPLATES[id];
                   const selected = chosenNation === id;
                   return (
                     <button
+                      type="button"
                       key={id}
                       onClick={() => {
                         setChosenNation(id);
@@ -414,10 +418,11 @@ export default function App() {
                 })}
               </div>
 
-              <div className="mt-6 flex justify-center">
+              <div className="mt-5 sm:mt-6 flex justify-center">
                 <button
+                  type="button"
                   onClick={() => startSoloMatch(chosenNation)}
-                  className="rounded-lg bg-amber-600 px-8 py-3 font-serif text-base font-bold text-stone-950 shadow-lg transition hover:bg-amber-500"
+                  className="w-full sm:w-auto rounded-lg bg-amber-600 px-8 py-3 font-serif text-sm sm:text-base font-bold text-stone-950 shadow-lg transition hover:bg-amber-500"
                 >
                   Prendre le commandement ({NATION_TEMPLATES[chosenNation].shortName})
                 </button>
@@ -426,10 +431,15 @@ export default function App() {
           ) : (
             <OnlineLobby
               connected={connected}
+              serverUrl={SERVER_URL}
               mySocketId={mySocketId}
               room={room}
               chatMessages={chatMessages}
               error={onlineError}
+              onRetryConnection={() => {
+                setOnlineError(null);
+                setSocketNonce((n) => n + 1);
+              }}
               onCreateRoom={(playerName, preferredNation) => {
                 setOnlineError(null);
                 setChatMessages([]);
@@ -490,7 +500,7 @@ export default function App() {
   const finalStandings = state.phase === 'ENDED' ? getVictoryStandings(state).standings : null;
 
   return (
-    <div className="relative h-screen w-screen overflow-hidden bg-stone-950 text-amber-50">
+    <div className="relative h-dvh w-screen overflow-hidden bg-stone-950 text-amber-50">
       <TopBar
         state={state}
         muted={muted}
@@ -499,7 +509,6 @@ export default function App() {
         onReturnToLobby={handleReturnToLobby}
       />
 
-      {/* Tutoriel interactif en 4 étapes (Solo uniquement) */}
       {tutorial && (
         <div className="absolute left-1/2 top-16 z-20 flex w-[92vw] max-w-md -translate-x-1/2 items-start justify-between gap-3 rounded-lg border border-amber-400/50 bg-stone-900/95 px-3.5 py-2.5 text-xs shadow-xl font-sans">
           <div>
@@ -507,6 +516,7 @@ export default function App() {
             <p className="mt-0.5 text-stone-200">{tutorial.text}</p>
           </div>
           <button
+            type="button"
             onClick={() =>
               applyLocalMutation((draft) => {
                 draft.tutorialStep = 0;
@@ -520,14 +530,12 @@ export default function App() {
         </div>
       )}
 
-      {/* Message d'alerte bref */}
       {toast && (
         <div className="absolute bottom-5 left-1/2 z-30 -translate-x-1/2 rounded-md border border-red-400/60 bg-red-950/95 px-4 py-2 text-xs font-semibold text-red-100 shadow-xl font-sans">
           {toast}
         </div>
       )}
 
-      {/* Grande carte interactive */}
       <MapCanvas
         state={state}
         selectedProvinceId={selectedId}
@@ -535,7 +543,6 @@ export default function App() {
         focusTarget={focusTarget}
       />
 
-      {/* Tiroir de la province sélectionnée */}
       {selectedProvince && (
         <ProvinceDrawer
           key={selectedProvince.id}
@@ -573,7 +580,6 @@ export default function App() {
         />
       )}
 
-      {/* 5 onglets repliables + Chat diplomatique + Télégrammes */}
       <CommandTabs
         state={state}
         isOnline={isOnlineMatch}
@@ -611,7 +617,6 @@ export default function App() {
         }
       />
 
-      {/* Modale de fin de partie */}
       {state.phase === 'ENDED' && state.winnerId && finalStandings && (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm font-sans">
           <div className="w-full max-w-md rounded-xl border border-amber-400/50 bg-stone-900 p-6 text-center shadow-2xl">
@@ -637,6 +642,7 @@ export default function App() {
             </div>
 
             <button
+              type="button"
               onClick={handleReturnToLobby}
               className="mt-5 w-full rounded-lg bg-amber-600 py-2.5 font-serif text-sm font-bold text-stone-950 hover:bg-amber-500"
             >

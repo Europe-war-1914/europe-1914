@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
-import { Trophy, Users, X } from 'lucide-react';
+import { Crown, LogIn, LogOut, Trophy, User, Users, X } from 'lucide-react';
 import { soundEngine } from './audio/soundEngine';
 import { NATION_TEMPLATES, PLAYABLE_NATIONS } from './data/nations';
 import { respondToDiplomaticOffer } from './engine/ai';
@@ -26,6 +26,7 @@ import type {
   UnitStack,
   UnitType,
 } from './engine/types';
+import { isSupabaseConfigured, supabase, type PlayerProfile } from './lib/supabase';
 import type {
   ActionResponse,
   ChatMessage,
@@ -33,6 +34,7 @@ import type {
   RoomSummary,
 } from './network/protocol';
 import { MapCanvas } from './renderer/MapCanvas';
+import { AuthModal } from './ui/AuthModal';
 import { CommandTabs } from './ui/CommandTabs';
 import { OnlineLobby } from './ui/OnlineLobby';
 import { ProvinceDrawer } from './ui/ProvinceDrawer';
@@ -70,6 +72,10 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [muted, setMuted] = useState<boolean>(() => soundEngine.isMuted());
 
+  // Compte joueur Supabase
+  const [profile, setProfile] = useState<PlayerProfile | null>(null);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+
   // État réseau multijoueur + chat diplomatique
   const socketRef = useRef<Socket | null>(null);
   const [socketNonce, setSocketNonce] = useState(0);
@@ -86,6 +92,48 @@ export default function App() {
 
   const isSoloActive = state !== null && !isOnlineMatch;
   const shouldConnectSocket = lobbyTab === 'online' || isOnlineMatch;
+
+  // Chargement et synchronisation du profil Supabase
+  useEffect(() => {
+    if (!supabase) return;
+    const client = supabase;
+
+    const loadProfile = async (userId: string) => {
+      const { data } = await client
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+      if (data) {
+        setProfile(data as PlayerProfile);
+      }
+    };
+
+    void client.auth.getSession().then(({ data }) => {
+      if (data.session?.user) {
+        void loadProfile(data.session.user.id);
+      }
+    });
+
+    const { data: listener } = client.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        void loadProfile(session.user.id);
+      } else {
+        setProfile(null);
+      }
+    });
+
+    return () => {
+      listener.subscription.unsubscribe();
+    };
+  }, []);
+
+  const handleLogout = async () => {
+    if (!supabase) return;
+    await supabase.auth.signOut();
+    setProfile(null);
+    soundEngine.playSelect();
+  };
 
   // Boucle de simulation locale UNIQUEMENT en mode Solo
   useEffect(() => {
@@ -334,6 +382,53 @@ export default function App() {
     return (
       <div className="flex min-h-dvh w-full flex-col items-center justify-start sm:justify-center bg-stone-950 p-3 pb-12 sm:p-4 text-amber-50 font-sans overflow-y-auto touch-pan-y">
         <div className="w-full max-w-4xl rounded-xl border border-amber-200/30 bg-stone-900/95 p-4 sm:p-6 shadow-2xl">
+          {/* Barre de compte joueur (Supabase) */}
+          {isSupabaseConfigured && (
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-stone-800 bg-stone-950/80 px-3 py-2 text-xs">
+              {profile ? (
+                <>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="flex items-center gap-1.5 font-semibold text-amber-100">
+                      <User className="h-3.5 w-3.5 text-amber-400" />
+                      {profile.username}
+                    </span>
+                    <span className="rounded border border-stone-700 bg-stone-900 px-2 py-0.5 font-mono text-[11px] text-amber-300">
+                      {profile.elo} ELO
+                    </span>
+                    {profile.is_commander && (
+                      <span className="flex items-center gap-1 rounded border border-amber-400/50 bg-amber-950/70 px-2 py-0.5 text-[11px] font-bold text-amber-300">
+                        <Crown className="h-3 w-3" />
+                        Commandant
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="flex items-center gap-1 rounded border border-stone-700 bg-stone-900 px-2.5 py-1 text-stone-300 hover:bg-stone-800 hover:text-white"
+                  >
+                    <LogOut className="h-3.5 w-3.5" />
+                    Déconnexion
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span className="text-stone-400">
+                    Mode Invité — connectez-vous pour sauvegarder votre ELO et vos packs.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setAuthModalOpen(true)}
+                    className="flex items-center gap-1.5 rounded bg-amber-600 px-3 py-1 font-bold text-stone-950 hover:bg-amber-500"
+                  >
+                    <LogIn className="h-3.5 w-3.5" />
+                    Connexion / Inscription
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
           <div className="text-center">
             <p className="text-[11px] sm:text-xs font-semibold uppercase tracking-[0.2em] sm:tracking-[0.25em] text-amber-400">
               Stratégie Compétitive • Sans Pay-to-Win
@@ -445,7 +540,7 @@ export default function App() {
                 setChatMessages([]);
                 socketRef.current?.emit(
                   'room:create',
-                  { playerName, preferredNation },
+                  { playerName: profile?.username ?? playerName, preferredNation },
                   (res: { ok: boolean; reason?: string }) => {
                     if (!res.ok) setOnlineError(res.reason ?? 'Impossible de créer le salon.');
                     else soundEngine.playSelect();
@@ -457,7 +552,7 @@ export default function App() {
                 setChatMessages([]);
                 socketRef.current?.emit(
                   'room:join',
-                  { code, playerName },
+                  { code, playerName: profile?.username ?? playerName },
                   (res: { ok: boolean; reason?: string }) => {
                     if (!res.ok) setOnlineError(res.reason ?? 'Impossible de rejoindre.');
                     else soundEngine.playSelect();
@@ -490,6 +585,13 @@ export default function App() {
             />
           )}
         </div>
+
+        {authModalOpen && (
+          <AuthModal
+            onClose={() => setAuthModalOpen(false)}
+            onSuccess={() => soundEngine.playSelect()}
+          />
+        )}
       </div>
     );
   }

@@ -73,6 +73,7 @@ export default function App() {
   const [muted, setMuted] = useState<boolean>(() => soundEngine.isMuted());
 
   // Compte joueur Supabase
+  const [authUser, setAuthUser] = useState<{ id: string; username: string } | null>(null);
   const [profile, setProfile] = useState<PlayerProfile | null>(null);
   const [authModalOpen, setAuthModalOpen] = useState(false);
 
@@ -93,34 +94,32 @@ export default function App() {
   const isSoloActive = state !== null && !isOnlineMatch;
   const shouldConnectSocket = lobbyTab === 'online' || isOnlineMatch;
 
-  // Chargement et synchronisation du profil Supabase
+  // 1. Suivi de la session Supabase
   useEffect(() => {
     if (!supabase) return;
     const client = supabase;
 
-    const loadProfile = async (userId: string) => {
-      const { data } = await client
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single();
-      if (data) {
-        setProfile(data as PlayerProfile);
+    const syncUser = (
+      user: { id: string; email?: string; user_metadata?: Record<string, unknown> } | null
+    ) => {
+      if (!user) {
+        setAuthUser(null);
+        setProfile(null);
+        return;
       }
+      const fallbackName =
+        (typeof user.user_metadata?.username === 'string' && user.user_metadata.username) ||
+        user.email?.split('@')[0] ||
+        'Commandant';
+      setAuthUser({ id: user.id, username: fallbackName });
     };
 
     void client.auth.getSession().then(({ data }) => {
-      if (data.session?.user) {
-        void loadProfile(data.session.user.id);
-      }
+      syncUser(data.session?.user ?? null);
     });
 
     const { data: listener } = client.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        void loadProfile(session.user.id);
-      } else {
-        setProfile(null);
-      }
+      syncUser(session?.user ?? null);
     });
 
     return () => {
@@ -128,9 +127,51 @@ export default function App() {
     };
   }, []);
 
+  // 2. Chargement du profil (séparé de onAuthStateChange pour éviter le blocage)
+  useEffect(() => {
+    if (!supabase || !authUser) return;
+    const client = supabase;
+    let cancelled = false;
+
+    const loadProfile = async () => {
+      const { data, error } = await client
+        .from('profiles')
+        .select('*')
+        .eq('id', authUser.id)
+        .maybeSingle();
+
+      if (cancelled) return;
+
+      if (error) {
+        console.error('Erreur lecture profil Supabase:', error);
+      }
+
+      if (data) {
+        setProfile(data as PlayerProfile);
+      } else {
+        setProfile({
+          id: authUser.id,
+          username: authUser.username,
+          elo: 1000,
+          wins: 0,
+          games_played: 0,
+          is_commander: false,
+          unlocked_themes: ['vintage'],
+        });
+      }
+    };
+
+    void loadProfile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authUser]);
+
   const handleLogout = async () => {
     if (!supabase) return;
     await supabase.auth.signOut();
+    setAuthUser(null);
     setProfile(null);
     soundEngine.playSelect();
   };

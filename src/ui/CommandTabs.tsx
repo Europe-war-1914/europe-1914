@@ -64,7 +64,9 @@ export function CommandTabs({
   onSetDiplomacy,
   onRespondOffer,
 }: CommandTabsProps) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.innerWidth >= 640 : true
+  );
   const [activeTab, setActiveTab] = useState<TabId>('constructions');
   const [seenChatCount, setSeenChatCount] = useState(chatMessages.length);
   const [chatChannel, setChatChannel] = useState<'global' | 'private'>('global');
@@ -160,15 +162,20 @@ export function CommandTabs({
   };
 
   return (
-    <div className="absolute bottom-3 right-3 top-16 z-20 flex items-start pointer-events-none font-sans">
+    <div className="absolute bottom-2 right-2 top-14 sm:bottom-3 sm:right-3 sm:top-16 z-20 flex items-start pointer-events-none font-sans">
       {/* Barre verticale d'onglets */}
-      <div className="pointer-events-auto flex flex-col gap-1 rounded-l-lg border border-r-0 border-amber-200/25 bg-stone-950/95 p-1 shadow-xl">
+      <div className="pointer-events-auto flex flex-col gap-1 rounded-l-lg border border-r-0 border-amber-200/25 bg-stone-950/95 p-0.5 sm:p-1 shadow-xl">
         <button
+          type="button"
           onClick={handleToggleOpen}
-          className="flex h-8 w-8 items-center justify-center rounded text-amber-200 hover:bg-stone-800"
+          className="flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded text-amber-200 hover:bg-stone-800"
           title={open ? 'Replier le panneau' : 'Ouvrir l’État-Major'}
         >
-          {open ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+          {open ? (
+            <ChevronRight className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+          ) : (
+            <ChevronLeft className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+          )}
         </button>
 
         {tabs.map((tab) => {
@@ -176,18 +183,19 @@ export function CommandTabs({
           const active = open && activeTab === tab.id;
           return (
             <button
+              type="button"
               key={tab.id}
               onClick={() => handleTabClick(tab.id)}
-              className={`relative flex h-9 w-8 items-center justify-center rounded transition ${
+              className={`relative flex h-7 w-7 sm:h-9 sm:w-8 items-center justify-center rounded transition ${
                 active
                   ? 'bg-amber-600 text-stone-950'
                   : 'text-stone-300 hover:bg-stone-800 hover:text-amber-100'
               }`}
               title={tab.label}
             >
-              <Icon className="h-4 w-4" />
+              <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
               {tab.count > 0 && (
-                <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">
+                <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 sm:h-4 sm:min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[9px] sm:text-[10px] font-bold text-white">
                   {tab.count}
                 </span>
               )}
@@ -198,12 +206,12 @@ export function CommandTabs({
 
       {/* Panneau déplié */}
       {open && (
-        <aside className="pointer-events-auto flex max-h-full w-72 sm:w-80 flex-col overflow-hidden rounded-r-lg rounded-bl-lg border border-amber-200/30 bg-stone-950/95 text-amber-50 shadow-2xl backdrop-blur-sm">
-          <div className="border-b border-stone-800 bg-stone-900/90 px-3 py-2 font-serif text-sm font-bold text-amber-100">
+        <aside className="pointer-events-auto flex max-h-full w-56 sm:w-80 flex-col overflow-hidden rounded-r-lg rounded-bl-lg border border-amber-200/30 bg-stone-950/95 text-amber-50 shadow-2xl backdrop-blur-sm">
+          <div className="border-b border-stone-800 bg-stone-900/90 px-2.5 py-1.5 sm:px-3 sm:py-2 font-serif text-xs sm:text-sm font-bold text-amber-100">
             {tabs.find((t) => t.id === activeTab)?.label}
           </div>
 
-          <div className="max-h-[48vh] overflow-y-auto p-2.5 space-y-2 text-xs">
+          <div className="max-h-[30vh] sm:max-h-[48vh] overflow-y-auto p-2 sm:p-2.5 space-y-2 text-[11px] sm:text-xs">
             {/* ONGLET 1 : CONSTRUCTIONS */}
             {activeTab === 'constructions' && (
               <>
@@ -225,6 +233,7 @@ export function CommandTabs({
                     );
                     return (
                       <button
+                        type="button"
                         key={c.id}
                         onClick={() => onFocusProvince(c.provinceId)}
                         className="w-full rounded border border-stone-800 bg-stone-900/80 p-2 text-left hover:border-amber-400/50"
@@ -233,7 +242,7 @@ export function CommandTabs({
                           <span>{prov?.name}</span>
                           <span className="font-mono text-amber-300">{rem} s</span>
                         </div>
-                        <p className="text-[11px] text-stone-400">
+                        <p className="text-[10px] sm:text-[11px] text-stone-400">
                           {BUILDING_SPECS[c.building].label}
                         </p>
                         <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded bg-stone-800">
@@ -257,6 +266,7 @@ export function CommandTabs({
                 ) : (
                   myRecruitments.map((r) => (
                     <button
+                      type="button"
                       key={r.id}
                       onClick={() => onFocusProvince(r.provinceId)}
                       className="flex w-full items-center justify-between rounded border border-stone-800 bg-stone-900/80 px-2.5 py-1.5 text-left hover:border-amber-400/50"
@@ -280,6 +290,7 @@ export function CommandTabs({
                 ) : (
                   myArmies.map((a) => (
                     <button
+                      type="button"
                       key={a.id}
                       onClick={() => onFocusProvince(a.toProvinceId)}
                       className="w-full rounded border border-stone-800 bg-stone-900/80 p-2 text-left hover:border-amber-400/50"
@@ -293,7 +304,7 @@ export function CommandTabs({
                           {Math.max(0, Math.ceil(a.arrivalAt - state.elapsedSeconds))} s
                         </span>
                       </div>
-                      <p className="text-[11px] text-stone-400">
+                      <p className="text-[10px] sm:text-[11px] text-stone-400">
                         {totalStack(a.units)} division(s) {a.isNaval ? '(voie maritime)' : ''}
                       </p>
                     </button>
@@ -318,6 +329,7 @@ export function CommandTabs({
                       >
                         <div className="flex items-center justify-between font-semibold">
                           <button
+                            type="button"
                             onClick={() => onFocusProvince(b.provinceId)}
                             className="text-amber-100 hover:underline"
                           >
@@ -325,7 +337,7 @@ export function CommandTabs({
                             {prov?.name}
                           </button>
                         </div>
-                        <div className="flex justify-between text-[11px]">
+                        <div className="flex justify-between text-[10px] sm:text-[11px]">
                           <span className="text-red-300">
                             {NATION_TEMPLATES[b.attacker].shortName} :{' '}
                             {totalStack(b.attackerUnits)}
@@ -337,8 +349,9 @@ export function CommandTabs({
                         </div>
                         {isAttacker && (
                           <button
+                            type="button"
                             onClick={() => onRetreat(b.id)}
-                            className="w-full rounded bg-stone-800 py-1 text-[11px] font-semibold text-amber-200 hover:bg-stone-700"
+                            className="w-full rounded bg-stone-800 py-1 text-[10px] sm:text-[11px] font-semibold text-amber-200 hover:bg-stone-700"
                           >
                             Ordonner la retraite
                           </button>
@@ -355,7 +368,7 @@ export function CommandTabs({
               <div className="space-y-2">
                 {state.pendingOffers.length > 0 && (
                   <div className="space-y-1.5 rounded border border-amber-400/50 bg-amber-950/40 p-2">
-                    <p className="text-[11px] font-bold text-amber-200">
+                    <p className="text-[10px] sm:text-[11px] font-bold text-amber-200">
                       Propositions reçues ({state.pendingOffers.length})
                     </p>
                     {state.pendingOffers.map((offer) => {
@@ -372,7 +385,7 @@ export function CommandTabs({
                             </span>
                             <span className="font-mono text-[10px] text-stone-400">{rem} s</span>
                           </div>
-                          <p className="text-[11px] text-stone-300">
+                          <p className="text-[10px] sm:text-[11px] text-stone-300">
                             Propose :{' '}
                             <strong className="text-amber-200">
                               {OFFER_LABEL[offer.type]}
@@ -380,15 +393,17 @@ export function CommandTabs({
                           </p>
                           <div className="grid grid-cols-2 gap-1.5">
                             <button
+                              type="button"
                               onClick={() => onRespondOffer(offer.id, true)}
-                              className="flex items-center justify-center gap-1 rounded bg-emerald-700 py-1 text-[11px] font-bold text-white hover:bg-emerald-600"
+                              className="flex items-center justify-center gap-1 rounded bg-emerald-700 py-1 text-[10px] sm:text-[11px] font-bold text-white hover:bg-emerald-600"
                             >
                               <Check className="h-3 w-3" />
                               Accepter
                             </button>
                             <button
+                              type="button"
                               onClick={() => onRespondOffer(offer.id, false)}
-                              className="flex items-center justify-center gap-1 rounded bg-stone-800 py-1 text-[11px] font-semibold text-stone-300 hover:bg-stone-700"
+                              className="flex items-center justify-center gap-1 rounded bg-stone-800 py-1 text-[10px] sm:text-[11px] font-semibold text-stone-300 hover:bg-stone-700"
                             >
                               <X className="h-3 w-3" />
                               Refuser
@@ -438,15 +453,16 @@ export function CommandTabs({
                       </div>
 
                       {!isSelf && (
-                        <div className="flex items-center justify-between gap-1">
+                        <div className="flex flex-wrap items-center justify-between gap-1">
                           <span
                             className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${badge.cls}`}
                           >
                             {badge.label}
                           </span>
-                          <div className="flex gap-1">
+                          <div className="flex flex-wrap gap-1">
                             {isOnline && humanPlayer && (
                               <button
+                                type="button"
                                 onClick={() => {
                                   setChatChannel('private');
                                   setPrivateTarget(row.nationId);
@@ -461,6 +477,7 @@ export function CommandTabs({
                             )}
                             {status !== 'war' && (
                               <button
+                                type="button"
                                 onClick={() => onSetDiplomacy(row.nationId, 'war')}
                                 className="rounded bg-red-900/70 px-1.5 py-0.5 text-[10px] text-red-100 hover:bg-red-800"
                               >
@@ -469,6 +486,7 @@ export function CommandTabs({
                             )}
                             {status !== 'nap' && status !== 'alliance' && (
                               <button
+                                type="button"
                                 onClick={() => onSetDiplomacy(row.nationId, 'nap')}
                                 className="rounded bg-sky-900/70 px-1.5 py-0.5 text-[10px] text-sky-100 hover:bg-sky-800"
                               >
@@ -477,6 +495,7 @@ export function CommandTabs({
                             )}
                             {status !== 'alliance' && (
                               <button
+                                type="button"
                                 onClick={() => onSetDiplomacy(row.nationId, 'alliance')}
                                 className="rounded bg-emerald-900/70 px-1.5 py-0.5 text-[10px] text-emerald-100 hover:bg-emerald-800"
                               >
@@ -485,6 +504,7 @@ export function CommandTabs({
                             )}
                             {status === 'war' && (
                               <button
+                                type="button"
                                 onClick={() => onSetDiplomacy(row.nationId, 'neutral')}
                                 className="rounded bg-stone-800 px-1.5 py-0.5 text-[10px] text-stone-200 hover:bg-stone-700"
                               >
@@ -503,8 +523,7 @@ export function CommandTabs({
             {/* ONGLET 5 : CHAT DIPLOMATIQUE EN DIRECT (MULTIJOUEUR) */}
             {activeTab === 'chat' && isOnline && (
               <div className="flex flex-col gap-2">
-                {/* Sélecteur Public / Dépêche privée */}
-                <div className="grid grid-cols-2 gap-1 rounded border border-stone-800 bg-stone-900 p-1 text-[11px] font-semibold">
+                <div className="grid grid-cols-2 gap-1 rounded border border-stone-800 bg-stone-900 p-1 text-[10px] sm:text-[11px] font-semibold">
                   <button
                     type="button"
                     onClick={() => setChatChannel('global')}
@@ -534,9 +553,9 @@ export function CommandTabs({
 
                 {chatChannel === 'private' && (
                   <div className="flex items-center gap-1.5">
-                    <span className="text-[11px] text-purple-300">À :</span>
+                    <span className="text-[10px] sm:text-[11px] text-purple-300">À :</span>
                     {otherHumanPlayers.length === 0 ? (
-                      <span className="text-[11px] text-stone-500">
+                      <span className="text-[10px] sm:text-[11px] text-stone-500">
                         Aucun autre joueur humain connecté.
                       </span>
                     ) : (
@@ -545,7 +564,7 @@ export function CommandTabs({
                         onChange={(e) =>
                           setPrivateTarget(e.target.value as PlayableNationId)
                         }
-                        className="flex-1 rounded border border-purple-500/40 bg-stone-900 px-2 py-1 text-[11px] text-purple-100 focus:border-purple-400 focus:outline-none"
+                        className="flex-1 rounded border border-purple-500/40 bg-stone-900 px-2 py-1 text-[10px] sm:text-[11px] text-purple-100 focus:border-purple-400 focus:outline-none"
                       >
                         {otherHumanPlayers.map((p) => (
                           <option key={p.socketId} value={p.nationId}>
@@ -557,10 +576,9 @@ export function CommandTabs({
                   </div>
                 )}
 
-                {/* Fil de messages */}
-                <div className="max-h-48 min-h-28 space-y-1.5 overflow-y-auto rounded border border-stone-800 bg-stone-900/60 p-2">
+                <div className="max-h-36 sm:max-h-48 min-h-20 space-y-1.5 overflow-y-auto rounded border border-stone-800 bg-stone-900/60 p-2">
                   {chatMessages.length === 0 ? (
-                    <p className="text-[11px] text-stone-500">
+                    <p className="text-[10px] sm:text-[11px] text-stone-500">
                       Aucune dépêche reçue. Envoyez un message public ou secret pour négocier !
                     </p>
                   ) : (
@@ -570,7 +588,7 @@ export function CommandTabs({
                       return (
                         <div
                           key={msg.id}
-                          className={`rounded px-2 py-1.5 text-[11px] leading-snug ${
+                          className={`rounded px-2 py-1.5 text-[10px] sm:text-[11px] leading-snug ${
                             isPrivate
                               ? 'border border-purple-500/40 bg-purple-950/50 text-purple-100'
                               : isMine
@@ -609,7 +627,6 @@ export function CommandTabs({
                   <div ref={chatBottomRef} />
                 </div>
 
-                {/* Saisie */}
                 <form onSubmit={handleSendChatSubmit} className="flex gap-1.5">
                   <input
                     type="text"
@@ -648,14 +665,15 @@ export function CommandTabs({
           </div>
 
           {/* Fil des derniers télégrammes */}
-          <div className="border-t border-stone-800 bg-stone-900/90 p-2">
+          <div className="border-t border-stone-800 bg-stone-900/90 p-1.5 sm:p-2">
             <div className="mb-1 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-stone-400">
               <AlertTriangle className="h-3 w-3 text-amber-400" />
               Télégrammes récents
             </div>
-            <div className="max-h-24 space-y-1 overflow-y-auto text-[11px]">
+            <div className="max-h-16 sm:max-h-24 space-y-1 overflow-y-auto text-[10px] sm:text-[11px]">
               {state.telegrams.slice(0, 4).map((tg) => (
                 <button
+                  type="button"
                   key={tg.id}
                   onClick={() => tg.provinceId && onFocusProvince(tg.provinceId)}
                   className={`block w-full rounded px-1.5 py-1 text-left transition ${

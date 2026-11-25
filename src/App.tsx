@@ -45,6 +45,18 @@ import { TopBar } from './ui/TopBar';
 const SERVER_URL =
   (import.meta.env.VITE_SERVER_URL as string | undefined) ?? 'http://localhost:3001';
 
+const ACTIVE_ROOM_KEY = 'europe1914_active_room';
+const CLIENT_TOKEN_KEY = 'europe1914_client_token';
+
+function getClientToken(): string {
+  let token = window.sessionStorage.getItem(CLIENT_TOKEN_KEY);
+  if (!token) {
+    token = `tok_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
+    window.sessionStorage.setItem(CLIENT_TOKEN_KEY, token);
+  }
+  return token;
+}
+
 const TUTORIAL_STEPS: Record<number, { title: string; text: string }> = {
   1: {
     title: 'Étape 1/4 — Prendre le commandement',
@@ -65,7 +77,9 @@ const TUTORIAL_STEPS: Record<number, { title: string; text: string }> = {
 };
 
 export default function App() {
-  const [lobbyTab, setLobbyTab] = useState<'solo' | 'online'>('solo');
+  const [lobbyTab, setLobbyTab] = useState<'solo' | 'online'>(() =>
+    window.sessionStorage.getItem(ACTIVE_ROOM_KEY) ? 'online' : 'solo'
+  );
   const [state, setState] = useState<GameState | null>(null);
   const [isOnlineMatch, setIsOnlineMatch] = useState(false);
   const [chosenNation, setChosenNation] = useState<PlayableNationId>('france');
@@ -104,7 +118,10 @@ export default function App() {
   const hasCenteredOnlineRef = useRef<boolean>(false);
 
   const isSoloActive = state !== null && !isOnlineMatch;
-  const shouldConnectSocket = lobbyTab === 'online' || isOnlineMatch;
+  const shouldConnectSocket =
+    lobbyTab === 'online' ||
+    isOnlineMatch ||
+    Boolean(window.sessionStorage.getItem(ACTIVE_ROOM_KEY));
 
   // Détection du retour après paiement Stripe (?payment=success / cancelled)
   useEffect(() => {
@@ -249,7 +266,7 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [isSoloActive]);
 
-  // Connexion Socket.io stable et tolérante au réveil du serveur (Render Free)
+  // Connexion Socket.io stable + reconnexion automatique en cours de partie
   useEffect(() => {
     if (!shouldConnectSocket) return;
 
@@ -267,6 +284,22 @@ export default function App() {
       setConnected(true);
       setMySocketId(socket.id ?? null);
       setOnlineError(null);
+
+      const savedRoom = window.sessionStorage.getItem(ACTIVE_ROOM_KEY);
+      if (savedRoom) {
+        socket.emit(
+          'room:rejoin',
+          { code: savedRoom, clientToken: getClientToken() },
+          (res: { ok: boolean; room?: RoomSummary }) => {
+            if (res.ok && res.room) {
+              setLobbyTab('online');
+              setRoom(res.room);
+            } else {
+              window.sessionStorage.removeItem(ACTIVE_ROOM_KEY);
+            }
+          }
+        );
+      }
     });
 
     socket.on('disconnect', () => {
@@ -293,6 +326,10 @@ export default function App() {
     socket.on('game:state', (incoming: GameState) => {
       setIsOnlineMatch(true);
       setState(incoming);
+
+      if (incoming.phase === 'ENDED') {
+        window.sessionStorage.removeItem(ACTIVE_ROOM_KEY);
+      }
 
       if (!hasCenteredOnlineRef.current) {
         hasCenteredOnlineRef.current = true;
@@ -367,6 +404,7 @@ export default function App() {
     prevTopTelegramIdRef.current = fresh.telegrams[0]?.id ?? null;
     prevPlayerBattlesRef.current = 0;
 
+    window.sessionStorage.removeItem(ACTIVE_ROOM_KEY);
     setIsOnlineMatch(false);
     setChatMessages([]);
     setState(fresh);
@@ -375,10 +413,37 @@ export default function App() {
     soundEngine.playMarch();
   };
 
+  const handleQuickPlay = (playerName: string, preferredNation?: PlayableNationId) => {
+    const socket = socketRef.current;
+    if (!socket) return;
+    setOnlineError(null);
+    setChatMessages([]);
+    socket.emit(
+      'room:quickplay',
+      {
+        playerName: profile?.username ?? playerName,
+        preferredNation,
+        clientToken: getClientToken(),
+        userId: profile?.id,
+      },
+      (res: { ok: boolean; room?: RoomSummary; reason?: string }) => {
+        if (!res.ok) {
+          setOnlineError(res.reason ?? 'Impossible de rejoindre le matchmaking.');
+          soundEngine.playError();
+        } else if (res.room) {
+          setRoom(res.room);
+          window.sessionStorage.setItem(ACTIVE_ROOM_KEY, res.room.code);
+          soundEngine.playSelect();
+        }
+      }
+    );
+  };
+
   const handleReturnToLobby = () => {
     if (isOnlineMatch && socketRef.current) {
       socketRef.current.emit('room:leave');
     }
+    window.sessionStorage.removeItem(ACTIVE_ROOM_KEY);
     hasCenteredOnlineRef.current = false;
     setIsOnlineMatch(false);
     setRoom(null);
@@ -572,6 +637,7 @@ export default function App() {
               type="button"
               onClick={() => {
                 setLobbyTab('solo');
+                window.sessionStorage.removeItem(ACTIVE_ROOM_KEY);
                 setRoom(null);
                 setChatMessages([]);
                 soundEngine.playSelect();
@@ -653,6 +719,7 @@ export default function App() {
               connected={connected}
               serverUrl={SERVER_URL}
               mySocketId={mySocketId}
+              defaultPlayerName={profile?.username}
               room={room}
               chatMessages={chatMessages}
               error={onlineError}
@@ -660,15 +727,29 @@ export default function App() {
                 setOnlineError(null);
                 setSocketNonce((n) => n + 1);
               }}
+              onQuickPlay={handleQuickPlay}
               onCreateRoom={(playerName, preferredNation) => {
                 setOnlineError(null);
                 setChatMessages([]);
                 socketRef.current?.emit(
                   'room:create',
-                  { playerName: profile?.username ?? playerName, preferredNation },
-                  (res: { ok: boolean; reason?: string }) => {
-                    if (!res.ok) setOnlineError(res.reason ?? 'Impossible de créer le salon.');
-                    else soundEngine.playSelect();
+                  {
+                    playerName: profile?.username ?? playerName,
+                    preferredNation,
+                    clientToken: getClientToken(),
+                    userId: profile?.id,
+                  },
+                  (res: { ok: boolean; room?: RoomSummary; reason?: string }) => {
+                    if (!res.ok) {
+                      setOnlineError(res.reason ?? 'Impossible de créer le salon.');
+                      soundEngine.playError();
+                    } else {
+                      if (res.room) {
+                        setRoom(res.room);
+                        window.sessionStorage.setItem(ACTIVE_ROOM_KEY, res.room.code);
+                      }
+                      soundEngine.playSelect();
+                    }
                   }
                 );
               }}
@@ -677,10 +758,23 @@ export default function App() {
                 setChatMessages([]);
                 socketRef.current?.emit(
                   'room:join',
-                  { code, playerName: profile?.username ?? playerName },
-                  (res: { ok: boolean; reason?: string }) => {
-                    if (!res.ok) setOnlineError(res.reason ?? 'Impossible de rejoindre.');
-                    else soundEngine.playSelect();
+                  {
+                    code,
+                    playerName: profile?.username ?? playerName,
+                    clientToken: getClientToken(),
+                    userId: profile?.id,
+                  },
+                  (res: { ok: boolean; room?: RoomSummary; reason?: string }) => {
+                    if (!res.ok) {
+                      setOnlineError(res.reason ?? 'Impossible de rejoindre.');
+                      soundEngine.playError();
+                    } else {
+                      if (res.room) {
+                        setRoom(res.room);
+                        window.sessionStorage.setItem(ACTIVE_ROOM_KEY, res.room.code);
+                      }
+                      soundEngine.playSelect();
+                    }
                   }
                 );
               }}
@@ -704,6 +798,7 @@ export default function App() {
               }}
               onLeaveRoom={() => {
                 socketRef.current?.emit('room:leave');
+                window.sessionStorage.removeItem(ACTIVE_ROOM_KEY);
                 setRoom(null);
                 setChatMessages([]);
               }}

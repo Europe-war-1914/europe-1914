@@ -11,6 +11,23 @@ export interface RoomPlayer {
   name: string;
   nationId: PlayableNationId;
   isHost: boolean;
+  userId?: string;
+}
+
+export interface RoomSummary {
+  code: string;
+  status: 'LOBBY' | 'PLAYING';
+  hostSocketId: string;
+  players: RoomPlayer[];
+  isPublic?: boolean;
+  autoStartAt?: number | null;
+}
+
+export interface RoomPlayer {
+  socketId: string;
+  name: string;
+  nationId: PlayableNationId;
+  isHost: boolean;
 }
 
 export interface RoomSummary {

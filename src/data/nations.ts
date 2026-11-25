@@ -1,5 +1,5 @@
 import type { AiPersonality, Nation, NationId, PlayableNationId } from '../engine/types';
-import { BLITZ_CONFIG } from './balance';
+import { createInitialTechLevels, GAME_CONFIG } from './balance';
 
 export interface NationTemplate {
   id: NationId;
@@ -16,82 +16,82 @@ export const NATION_TEMPLATES: Record<NationId, NationTemplate> = {
     id: 'france',
     name: 'République Française',
     shortName: 'France',
-    color: '#3b6ea5',
-    borderColor: '#1e3a5f',
+    color: '#36587a', // Bleu horizon militaire
+    borderColor: '#1a2f45',
     defaultPersonality: 'fortress',
-    lore: 'Économie solide et frontière fortifiée face à l’Empire allemand.',
+    lore: 'Défense solide et industrie équilibrée face à l’Empire allemand.',
   },
   germany: {
     id: 'germany',
     name: 'Empire Allemand',
     shortName: 'Allemagne',
-    color: '#6b7280',
-    borderColor: '#374151',
+    color: '#575e66', // Feldgrau acier
+    borderColor: '#292e33',
     defaultPersonality: 'expansionist',
-    lore: 'Industrie d’acier puissante au cœur de l’Europe, mais encerclée sur deux fronts.',
+    lore: 'Puissance d’acier au centre de l’Europe, exposée sur deux fronts.',
   },
   uk: {
     id: 'uk',
     name: 'Royaume-Uni',
     shortName: 'Royaume-Uni',
-    color: '#b94a48',
-    borderColor: '#7f1d1d',
+    color: '#8f3b3b', // Rouge brique impérial
+    borderColor: '#4f1b1b',
     defaultPersonality: 'diplomat',
-    lore: 'Protégé par la Manche, idéal pour dominer les mers et frapper sur les côtes.',
+    lore: 'Protégé par la mer, redoutable avec ses frégates et sous-marins.',
   },
   italy: {
     id: 'italy',
     name: 'Royaume d’Italie',
     shortName: 'Italie',
-    color: '#4f8a5b',
-    borderColor: '#254e2e',
+    color: '#466b4c', // Vert olive alpin
+    borderColor: '#223826',
     defaultPersonality: 'opportunist',
-    lore: 'Position clé en Méditerranée et montagnes alpines faciles à défendre.',
+    lore: 'Carrefour méditerranéen adossé aux reliefs alpins.',
   },
   austria: {
     id: 'austria',
     name: 'Autriche-Hongrie',
     shortName: 'Autriche-Hongrie',
-    color: '#c29b40',
-    borderColor: '#785a18',
+    color: '#9c7c38', // Ocre impérial patiné
+    borderColor: '#544016',
     defaultPersonality: 'fortress',
-    lore: 'Vaste empire danubien riche en acier, exposé à l’Est comme aux Balkans.',
+    lore: 'Vaste empire danubien au cœur des Balkans et de l’Europe centrale.',
   },
   russia: {
     id: 'russia',
     name: 'Empire Russe',
     shortName: 'Russie',
-    color: '#2e6f5e',
-    borderColor: '#164237',
-    defaultPersonality: 'expansionist',
-    lore: 'Immense profondeur stratégique et réserves humaines considérables.',
+    color: '#2c594c', // Vert sapin militaire
+    borderColor: '#153028',
+    defaultPersonality: 'fortress',
+    lore: 'Immense profondeur territoriale et réserves d’infanterie considérables.',
   },
   spain: {
     id: 'spain',
     name: 'Royaume d’Espagne',
     shortName: 'Espagne',
-    color: '#c87d32',
-    borderColor: '#7c4714',
+    color: '#9c6230', // Terre de Sienne
+    borderColor: '#543214',
     defaultPersonality: 'diplomat',
-    lore: 'Abritée derrière les Pyrénées, parfaite pour bâtir son industrie tranquillement.',
+    lore: 'Abritée derrière les Pyrénées pour développer recherche et industrie.',
   },
   ottoman: {
     id: 'ottoman',
     name: 'Empire Ottoman',
     shortName: 'Ottomans',
-    color: '#9a4f63',
-    borderColor: '#5c2635',
+    color: '#783c4c', // Bordeaux patiné
+    borderColor: '#401c26',
     defaultPersonality: 'opportunist',
-    lore: 'Contrôle le Bosphore et l’accès au pétrole de la mer Noire.',
+    lore: 'Contrôle les détroits et les réserves énergétiques orientales.',
   },
   neutral: {
     id: 'neutral',
-    name: 'Nations Neutres',
+    name: 'Puissances Neutres',
     shortName: 'Neutre',
-    color: '#bfb39b',
-    borderColor: '#7d725e',
+    color: '#8f8672', // Parchemin militaire neutre
+    borderColor: '#524c3e',
     defaultPersonality: 'fortress',
-    lore: 'États tampons stratégiques (Belgique, Suisse, Pays-Bas, Balkans, Scandinavie).',
+    lore: 'États tampons qui renforcent leurs garnisons et défenses au fil de la guerre.',
   },
 };
 
@@ -107,10 +107,9 @@ export const PLAYABLE_NATIONS: PlayableNationId[] = [
 ];
 
 export function createInitialNations(playerNationId: PlayableNationId): Record<NationId, Nation> {
-  const personalities: AiPersonality[] = ['expansionist', 'fortress', 'opportunist', 'diplomat'];
   const result = {} as Record<NationId, Nation>;
 
-  (Object.keys(NATION_TEMPLATES) as NationId[]).forEach((id, idx) => {
+  (Object.keys(NATION_TEMPLATES) as NationId[]).forEach((id) => {
     const tpl = NATION_TEMPLATES[id];
     const isPlayer = id === playerNationId;
     result[id] = {
@@ -120,16 +119,16 @@ export function createInitialNations(playerNationId: PlayableNationId): Record<N
       color: tpl.color,
       borderColor: tpl.borderColor,
       isPlayer,
-      personality: isPlayer
-        ? 'diplomat'
-        : id === 'neutral'
-        ? 'fortress'
-        : personalities[(idx + Math.floor(Math.random() * 2)) % personalities.length],
+      personality: isPlayer ? 'diplomat' : tpl.defaultPersonality,
       resources:
         id === 'neutral'
-          ? { gold: 100, steel: 50, oil: 0 }
-          : { ...BLITZ_CONFIG.startingResources },
+          ? { gold: 200, steel: 100, gas: 50 }
+          : { ...GAME_CONFIG.startingResources },
+      techPoints: id === 'neutral' ? 0 : GAME_CONFIG.startingTechPoints,
+      techLevels: createInitialTechLevels(),
+      activeAllianceWith: null,
       isEliminated: false,
+      lastAttackAt: 0,
     };
   });
 

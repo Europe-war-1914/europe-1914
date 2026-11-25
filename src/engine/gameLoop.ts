@@ -1,10 +1,16 @@
-import { BLITZ_CONFIG } from '../data/balance';
 import { createInitialNations, PLAYABLE_NATIONS } from '../data/nations';
 import { createInitialProvinces } from '../data/provinces';
 import { tickAI } from './ai';
 import { cloneStack, eliminateNation, tickMovementsAndCombat } from './combat';
+import { tickPendingDiplomacy } from './diplomacy';
 import { pushTelegram, tickEconomy } from './economy';
-import type { GameState, NationId, PlayableNationId, Province } from './types';
+import type {
+  GameState,
+  MatchSettings,
+  NationId,
+  PlayableNationId,
+  Province,
+} from './types';
 
 export interface NationStanding {
   nationId: PlayableNationId;
@@ -13,7 +19,14 @@ export interface NationStanding {
   isEliminated: boolean;
 }
 
-export function createNewGame(playerNationId: PlayableNationId): GameState {
+export function createNewGame(
+  playerNationId: PlayableNationId,
+  settings?: Partial<MatchSettings>
+): GameState {
+  const mode = settings?.mode ?? 'blitz';
+  const fogOfWar = settings?.fogOfWar ?? true;
+  const aiDifficulty = settings?.aiDifficulty ?? 'standard';
+
   const nations = createInitialNations(playerNationId);
   const provinces = createInitialProvinces();
 
@@ -24,12 +37,13 @@ export function createNewGame(playerNationId: PlayableNationId): GameState {
   }
 
   const state: GameState = {
-    mode: 'blitz',
-    phase: 'MOBILIZATION',
+    mode,
+    fogOfWar,
+    aiDifficulty,
+    phase: 'WAR',
     elapsedSeconds: 0,
-    maxDurationSeconds: Number.POSITIVE_INFINITY,
-    mobilizationDurationSeconds: BLITZ_CONFIG.mobilizationDurationSeconds,
     lastAiTickAt: 0,
+    lastNeutralGrowthAt: 0,
     playerNationId,
     nations,
     provinces,
@@ -47,7 +61,7 @@ export function createNewGame(playerNationId: PlayableNationId): GameState {
 
   pushTelegram(
     state,
-    'Mobilisation générale (2m30) : la guerre durera jusqu’à ce qu’une seule nation tienne sa capitale !',
+    '1914 : L’Europe en Flammes — Guerre Totale ouverte ! Protégez votre capitale et son laboratoire : le dernier empire debout l’emporte.',
     'info'
   );
 
@@ -58,14 +72,20 @@ export function cloneGameState(state: GameState): GameState {
   const nations = {} as GameState['nations'];
   for (const key of Object.keys(state.nations) as NationId[]) {
     const n = state.nations[key];
-    nations[key] = { ...n, resources: { ...n.resources } };
+    nations[key] = {
+      ...n,
+      resources: { ...n.resources },
+      techLevels: { ...n.techLevels },
+    };
   }
 
   const provinces: Record<string, Province> = {};
   for (const [id, p] of Object.entries(state.provinces)) {
     provinces[id] = {
       ...p,
-      buildings: { ...p.buildings },
+      extractionFactories: { ...p.extractionFactories },
+      defenses: { ...p.defenses },
+      activeWeaknesses: p.activeWeaknesses.map((w) => ({ ...w })),
       garrison: cloneStack(p.garrison),
     };
   }
@@ -74,7 +94,12 @@ export function cloneGameState(state: GameState): GameState {
     ...state,
     nations,
     provinces,
-    movingArmies: state.movingArmies.map((a) => ({ ...a, units: cloneStack(a.units) })),
+    movingArmies: state.movingArmies.map((a) => ({
+      ...a,
+      route: [...a.route],
+      detectedBy: a.detectedBy ? [...a.detectedBy] : undefined,
+      units: cloneStack(a.units),
+    })),
     battles: state.battles.map((b) => ({
       ...b,
       attackerUnits: cloneStack(b.attackerUnits),
@@ -85,14 +110,13 @@ export function cloneGameState(state: GameState): GameState {
     diplomacy: { ...state.diplomacy },
     pendingOffers: state.pendingOffers.map((o) => ({ ...o })),
     telegrams: state.telegrams.map((t) => ({ ...t })),
-    eliminationOrder: state.eliminationOrder ? [...state.eliminationOrder] : [],
+    eliminationOrder: [...state.eliminationOrder],
   };
 }
 
 export function getVictoryStandings(state: GameState): {
   standings: NationStanding[];
   totalVictoryPoints: number;
-  targetVictoryPoints: number;
   aliveCount: number;
 } {
   let totalVictoryPoints = 0;
@@ -123,22 +147,17 @@ export function getVictoryStandings(state: GameState): {
     provincesCount: countMap[nationId],
     isEliminated: Boolean(state.nations[nationId]?.isEliminated),
   })).sort((a, b) => {
-    if (a.isEliminated !== b.isEliminated) {
-      return a.isEliminated ? 1 : -1;
-    }
+    if (a.isEliminated !== b.isEliminated) return a.isEliminated ? 1 : -1;
     if (a.isEliminated && b.isEliminated) {
       return elimOrder.indexOf(b.nationId) - elimOrder.indexOf(a.nationId);
     }
-    return b.victoryPoints - a.victoryPoints || b.provincesCount - a.provincesCount;
+    return b.provincesCount - a.provincesCount || b.victoryPoints - a.victoryPoints;
   });
-
-  const aliveCount = standings.filter((s) => !s.isEliminated).length;
 
   return {
     standings,
     totalVictoryPoints,
-    targetVictoryPoints: totalVictoryPoints,
-    aliveCount,
+    aliveCount: standings.filter((s) => !s.isEliminated).length,
   };
 }
 
@@ -150,36 +169,25 @@ export function stepGameState(prevState: GameState, dtRealSeconds: number): Game
   const state = cloneGameState(prevState);
   state.elapsedSeconds += dtRealSeconds;
 
-  if (
-    state.phase === 'MOBILIZATION' &&
-    state.elapsedSeconds >= state.mobilizationDurationSeconds
-  ) {
-    state.phase = 'WAR';
-    pushTelegram(
-      state,
-      'Fin de la mobilisation ! Les frontières s’ouvrent : éliminez les capitales adverses jusqu’à la victoire finale !',
-      'danger'
-    );
-  }
-
   tickEconomy(state, dtRealSeconds);
+  tickPendingDiplomacy(state);
   tickMovementsAndCombat(state);
   tickAI(state);
 
-  // Vérifie si une capitale a été perdue
+  // Sécurité : toute nation dont la capitale ne lui appartient plus est éliminée
   for (const nationId of PLAYABLE_NATIONS) {
     const nation = state.nations[nationId];
     if (!nation || nation.isEliminated) continue;
     const capId = nation.capitalProvinceId;
     if (capId && state.provinces[capId]?.owner !== nationId) {
-      eliminateNation(state, nationId);
+      eliminateNation(state, nationId, state.provinces[capId]?.owner);
     }
   }
 
+  // Victoire uniquement lorsqu'il ne reste plus qu'une seule nation active (pas de limite de temps)
   const { standings } = getVictoryStandings(state);
   const alive = standings.filter((s) => !s.isEliminated);
 
-  // La partie continue tant qu'il reste au moins 2 nations en vie (ou jusqu'au dernier survivant)
   if (alive.length <= 1) {
     state.phase = 'ENDED';
     state.winnerId = alive[0]?.nationId ?? standings[0].nationId;

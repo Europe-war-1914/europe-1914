@@ -1,10 +1,18 @@
 import type {
-  BuildingType,
+  DefenseType,
   DiplomaticStatus,
+  ExtractionResource,
+  MatchSettings,
   PlayableNationId,
+  TechAxis,
   UnitStack,
   UnitType,
 } from '../engine/types';
+
+export interface ActionResponse {
+  ok: boolean;
+  reason?: string;
+}
 
 export interface RoomPlayer {
   socketId: string;
@@ -21,20 +29,7 @@ export interface RoomSummary {
   players: RoomPlayer[];
   isPublic?: boolean;
   autoStartAt?: number | null;
-}
-
-export interface RoomPlayer {
-  socketId: string;
-  name: string;
-  nationId: PlayableNationId;
-  isHost: boolean;
-}
-
-export interface RoomSummary {
-  code: string;
-  status: 'LOBBY' | 'PLAYING';
-  hostSocketId: string;
-  players: RoomPlayer[];
+  settings?: MatchSettings;
 }
 
 export interface ChatMessage {
@@ -50,15 +45,14 @@ export interface ChatMessage {
 }
 
 export type ClientAction =
-  | { type: 'build'; provinceId: string; building: BuildingType }
-  | { type: 'recruit'; provinceId: string; unit: UnitType }
-  | { type: 'move'; fromId: string; toId: string; units: UnitStack }
-  | { type: 'bombard'; fromId: string; targetId: string }
+  | { type: 'unlockTech'; axis: TechAxis }
+  | { type: 'upgradeBarracks'; provinceId: string }
+  | { type: 'upgradeLaboratory'; provinceId: string }
+  | { type: 'upgradeExtraction'; provinceId: string; resource: ExtractionResource }
+  | { type: 'upgradeDefense'; provinceId: string; defense: DefenseType }
+  | { type: 'recruit'; provinceId: string; unit: UnitType; count: number }
+  | { type: 'move'; fromId: string; targetId: string; units: UnitStack }
+  | { type: 'turnAround'; armyId: string }
   | { type: 'retreat'; battleId: string }
   | { type: 'diplomacy'; target: PlayableNationId; status: DiplomaticStatus }
   | { type: 'respondOffer'; offerId: string; accept: boolean };
-
-export interface ActionResponse {
-  ok: boolean;
-  reason?: string;
-}

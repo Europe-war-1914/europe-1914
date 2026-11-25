@@ -1,11 +1,11 @@
 import {
   Clock,
   Coins,
-  Droplets,
   Flame,
+  FlaskConical,
   Radio,
   RotateCcw,
-  Trophy,
+  Shield,
   Volume2,
   VolumeX,
   Wrench,
@@ -19,6 +19,7 @@ interface TopBarProps {
   state: GameState;
   muted: boolean;
   roomCode?: string | null;
+  onOpenTechTree: () => void;
   onToggleMute: () => void;
   onReturnToLobby: () => void;
 }
@@ -34,28 +35,22 @@ export function TopBar({
   state,
   muted,
   roomCode,
+  onOpenTechTree,
   onToggleMute,
   onReturnToLobby,
 }: TopBarProps) {
   const player = state.nations[state.playerNationId];
   const tpl = NATION_TEMPLATES[state.playerNationId];
   const income = getNationIncomePerMinute(state, state.playerNationId);
-  const { standings, aliveCount } = getVictoryStandings(state);
-  const playerStanding = standings.find((s) => s.nationId === state.playerNationId);
-  const playerVp = playerStanding?.victoryPoints ?? 0;
-
-  const isMob = state.phase === 'MOBILIZATION';
-  const clockValue = isMob
-    ? state.mobilizationDurationSeconds - state.elapsedSeconds
-    : state.elapsedSeconds;
+  const { aliveCount } = getVictoryStandings(state);
 
   return (
-    <header className="absolute left-0 right-0 top-0 z-20 flex flex-wrap items-center justify-between gap-1.5 sm:gap-2 border-b border-amber-200/25 bg-stone-950/92 px-2.5 sm:px-3 py-1.5 sm:py-2 text-amber-50 shadow-lg backdrop-blur-sm font-sans">
-      {/* Nation + Ressources */}
-      <div className="flex flex-wrap items-center gap-1.5 sm:gap-3">
-        <div className="flex items-center gap-1.5 sm:gap-2 rounded border border-amber-200/25 bg-stone-900 px-2 sm:px-2.5 py-0.5 sm:py-1">
+    <header className="absolute left-0 right-0 top-0 z-20 flex flex-wrap items-center justify-between gap-2 border-b border-stone-700/80 bg-stone-950/95 px-2.5 py-1.5 sm:px-3 sm:py-2 text-stone-100 shadow-xl backdrop-blur-sm font-sans">
+      {/* Nation + Ressources (Or, Acier, Gaz, PT) */}
+      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2.5">
+        <div className="flex items-center gap-2 rounded border border-stone-700 bg-stone-900 px-2 py-1">
           <span
-            className="h-2.5 w-2.5 sm:h-3 sm:w-3 rounded-full border border-white/50"
+            className="h-2.5 w-2.5 rounded-full border border-white/50"
             style={{ backgroundColor: tpl.color }}
           />
           <span className="font-serif text-xs sm:text-sm font-bold text-amber-100">
@@ -63,68 +58,78 @@ export function TopBar({
           </span>
         </div>
 
-        <div className="flex items-center gap-1.5 sm:gap-3 text-[11px] sm:text-xs">
-          <div className="flex items-center gap-1 rounded bg-stone-900/90 px-1.5 sm:px-2 py-0.5 sm:py-1 border border-stone-700/80">
-            <Coins className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-amber-400" />
-            <span className="font-bold text-amber-100">{Math.floor(player.resources.gold)}</span>
-            <span className="hidden md:inline text-emerald-400">+{income.gold}/m</span>
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-[11px] sm:text-xs font-mono">
+          <div
+            className="flex items-center gap-1 rounded border border-stone-800 bg-stone-900/90 px-2 py-1"
+            title="Or (trésorerie et diplomatie)"
+          >
+            <Coins className="h-3.5 w-3.5 text-amber-400" />
+            <span className="font-bold text-amber-200">{Math.floor(player.resources.gold)}</span>
+            <span className="hidden sm:inline text-[10px] text-emerald-400">+{income.gold}/m</span>
           </div>
 
-          <div className="flex items-center gap-1 rounded bg-stone-900/90 px-1.5 sm:px-2 py-0.5 sm:py-1 border border-stone-700/80">
-            <Wrench className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-slate-300" />
+          <div
+            className="flex items-center gap-1 rounded border border-stone-800 bg-stone-900/90 px-2 py-1"
+            title="Acier (blindés, marine et défenses)"
+          >
+            <Wrench className="h-3.5 w-3.5 text-slate-300" />
             <span className="font-bold text-slate-100">{Math.floor(player.resources.steel)}</span>
-            <span className="hidden md:inline text-emerald-400">+{income.steel}/m</span>
+            <span className="hidden sm:inline text-[10px] text-emerald-400">+{income.steel}/m</span>
           </div>
 
-          <div className="flex items-center gap-1 rounded bg-stone-900/90 px-1.5 sm:px-2 py-0.5 sm:py-1 border border-stone-700/80">
-            <Droplets className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-sky-400" />
-            <span className="font-bold text-sky-100">{Math.floor(player.resources.oil)}</span>
-            <span className="hidden md:inline text-emerald-400">+{income.oil}/m</span>
+          <div
+            className="flex items-center gap-1 rounded border border-stone-800 bg-stone-900/90 px-2 py-1"
+            title="Gaz (aviation, blindés et marine)"
+          >
+            <Flame className="h-3.5 w-3.5 text-orange-400" />
+            <span className="font-bold text-orange-200">{Math.floor(player.resources.gas)}</span>
+            <span className="hidden sm:inline text-[10px] text-emerald-400">+{income.gas}/m</span>
           </div>
+
+          <button
+            type="button"
+            onClick={onOpenTechTree}
+            className="flex items-center gap-1.5 rounded border border-sky-500/50 bg-sky-950/80 px-2.5 py-1 text-sky-200 hover:bg-sky-900/80 transition"
+            title="Ouvrir l’arbre technologique (déblocage instantané)"
+          >
+            <FlaskConical className="h-3.5 w-3.5 text-sky-300" />
+            <span className="font-bold text-sky-100">{Math.floor(player.techPoints)} PT</span>
+            <span className="hidden md:inline text-[10px] text-sky-300">
+              (+{income.techPoints}/m)
+            </span>
+            <span className="font-sans text-[11px] font-semibold text-sky-100">• Tech</span>
+          </button>
         </div>
       </div>
 
-      {/* Phase & Chrono temps réel / Code salon */}
-      <div className="flex items-center gap-1.5 sm:gap-2">
+      {/* Statut Guerre Totale + Chrono + Audio + Retour Lobby */}
+      <div className="flex items-center gap-1.5 sm:gap-2 text-[11px] sm:text-xs">
         <div
-          className={`flex items-center gap-1.5 rounded px-2 sm:px-3 py-0.5 sm:py-1 text-[11px] sm:text-xs font-bold border ${
-            isMob
-              ? 'border-amber-400/50 bg-amber-950/80 text-amber-200'
-              : 'border-red-500/50 bg-red-950/80 text-red-200'
-          }`}
+          className="hidden md:flex items-center gap-1.5 rounded border border-stone-700 bg-stone-900 px-2.5 py-1 text-stone-200"
+          title="Condition de victoire : dernier empire survivant"
         >
-          {isMob ? <Clock className="h-3 w-3 sm:h-3.5 sm:w-3.5" /> : <Flame className="h-3 w-3 sm:h-3.5 sm:w-3.5" />}
-          <span>{isMob ? 'MOBILISATION' : 'GUERRE'}</span>
-          <span className="font-mono text-xs sm:text-sm">{formatClock(clockValue)}</span>
+          <Shield className="h-3.5 w-3.5 text-amber-400" />
+          <span>{aliveCount}/8 Empires</span>
         </div>
 
         <div
-          className="hidden sm:flex items-center gap-1.5 rounded border border-emerald-500/30 bg-emerald-950/50 px-2.5 py-1 text-[11px] font-semibold text-emerald-300"
-          title="Partie synchronisée en temps réel (format en ligne)"
+          className="flex items-center gap-1.5 rounded border border-stone-700 bg-stone-900 px-2 py-1 font-mono text-stone-200"
+          title="Temps de guerre écoulé (aucune limite de temps fixe)"
         >
-          <Radio className="h-3 w-3 animate-pulse" />
-          <span>{roomCode ? `SALON ${roomCode}` : 'TEMPS RÉEL'}</span>
+          <Clock className="h-3.5 w-3.5 text-amber-400" />
+          <span>{formatClock(state.elapsedSeconds)}</span>
         </div>
-      </div>
 
-      {/* Capitales restantes + Audio + Menu */}
-      <div className="flex items-center gap-1.5 sm:gap-2">
-        <div className="flex items-center gap-1 rounded border border-amber-300/30 bg-stone-900 px-2 sm:px-2.5 py-0.5 sm:py-1 text-[11px] sm:text-xs">
-          <Trophy className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-amber-400" />
-          <span className="font-bold text-amber-100">
-            {aliveCount}/8 Cap. <span className="hidden md:inline">• {playerVp} PV</span>
-          </span>
+        <div className="hidden sm:flex items-center gap-1 rounded border border-stone-800 bg-stone-900/80 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-stone-300">
+          <Radio className="h-3 w-3 text-emerald-400" />
+          <span>{roomCode ? `SALON ${roomCode}` : 'GUERRE TOTALE'}</span>
         </div>
 
         <button
           type="button"
           onClick={onToggleMute}
-          className={`flex items-center justify-center rounded border p-1 sm:p-1.5 transition ${
-            muted
-              ? 'border-stone-700 bg-stone-900 text-stone-500 hover:text-stone-300'
-              : 'border-amber-300/30 bg-stone-900 text-amber-200 hover:bg-stone-800'
-          }`}
-          title={muted ? 'Activer les effets sonores' : 'Couper les effets sonores'}
+          className="flex h-7 w-7 items-center justify-center rounded border border-stone-700 bg-stone-900 text-stone-300 hover:bg-stone-800 hover:text-white"
+          title={muted ? 'Activer le son' : 'Couper le son'}
         >
           {muted ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
         </button>
@@ -132,11 +137,11 @@ export function TopBar({
         <button
           type="button"
           onClick={onReturnToLobby}
-          className="flex items-center gap-1 rounded border border-stone-700 bg-stone-900 px-2 sm:px-2.5 py-0.5 sm:py-1 text-[11px] sm:text-xs text-stone-300 hover:bg-stone-800 hover:text-white"
-          title="Changer de nation / Nouvelle partie"
+          className="flex items-center gap-1 rounded border border-stone-700 bg-stone-900 px-2 py-1 text-stone-300 hover:bg-stone-800 hover:text-white"
+          title="Retourner au menu principal"
         >
-          <RotateCcw className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-          <span className="hidden sm:inline">Menu</span>
+          <RotateCcw className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">Lobby</span>
         </button>
       </div>
     </header>

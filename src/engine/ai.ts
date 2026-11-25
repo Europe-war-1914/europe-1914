@@ -1,31 +1,41 @@
-import { BUILDING_SPECS, getBuildingCost, UNIT_SPECS } from '../data/balance';
-import { NATION_TEMPLATES, PLAYABLE_NATIONS } from '../data/nations';
 import {
-  getDiplomaticStatus,
-  orderArtilleryBombardment,
+  createEmptyStack,
+  EXTRACTION_TECH_MAP,
+  GAME_CONFIG,
+  TECH_COSTS_TP,
+  UNIT_SPECS,
+} from '../data/balance';
+import { PLAYABLE_NATIONS } from '../data/nations';
+import {
+  getEffectiveDefenseLevel,
+  isCoastalProvince,
   orderMoveArmy,
-  setDiplomaticStatus,
   totalStack,
 } from './combat';
+import { getDiplomaticStatus, requestDiplomaticAction } from './diplomacy';
 import {
   canAfford,
-  createId,
-  pushTelegram,
-  startConstruction,
   startRecruitment,
+  unlockTechnology,
+  upgradeBarracks,
+  upgradeDefense,
+  upgradeExtractionFactory,
+  upgradeLaboratory,
 } from './economy';
 import type {
-  BuildingType,
+  DefenseType,
+  ExtractionResource,
   GameState,
   NationId,
   PlayableNationId,
   Province,
-  UnitStack,
+  TechAxis,
   UnitType,
 } from './types';
 
-const AI_THINK_INTERVAL_SECONDS = 4;
-const NAVAL_POWERS: PlayableNationId[] = ['uk', 'italy', 'ottoman', 'spain'];
+const AI_THINK_INTERVAL_SECONDS = 5;
+// Pause minimale entre deux offensives pour stopper les attaques compulsives
+const AI_OFFENSIVE_COOLDOWN_SECONDS = 32;
 
 function isBorderProvince(state: GameState, prov: Province, owner: NationId): boolean {
   const adjacent = [...prov.neighbors, ...prov.seaNeighbors];
@@ -36,6 +46,52 @@ function isBorderProvince(state: GameState, prov: Province, owner: NationId): bo
   });
 }
 
+/** 1. Déblocage réfléchi des technologies (défenses + ressources + armée) */
+function tryAiResearch(state: GameState, nationId: PlayableNationId): void {
+  const nation = state.nations[nationId];
+  const priorities: TechAxis[] =
+    nation.personality === 'fortress'
+      ? [
+          'bunkers',
+          'trenches',
+          'gold_extraction',
+          'steel_extraction',
+          'infantry',
+          'aa_defense',
+          'naval_defense',
+          'worker_speed',
+          'tanks',
+          'gas_extraction',
+          'aviation',
+          'naval',
+        ]
+      : [
+          'gold_extraction',
+          'steel_extraction',
+          'bunkers',
+          'infantry',
+          'trenches',
+          'tanks',
+          'gas_extraction',
+          'worker_speed',
+          'aa_defense',
+          'aviation',
+          'naval_defense',
+          'naval',
+        ];
+
+  for (const axis of priorities) {
+    const cur = nation.techLevels[axis];
+    if (cur >= 3) continue;
+    const cost = TECH_COSTS_TP[(cur + 1) as 1 | 2 | 3];
+    if (nation.techPoints >= cost) {
+      unlockTechnology(state, nationId, axis);
+      return;
+    }
+  }
+}
+
+/** 2. Constructions défensives et économiques (Labo, Usines, Défenses sur capitale & frontières) */
 function tryAiConstruction(
   state: GameState,
   nationId: PlayableNationId,
@@ -46,58 +102,52 @@ function tryAiConstruction(
   if (activeCount >= 2) return;
 
   const nation = state.nations[nationId];
-  const freeProvinces = owned.filter(
+  const freeProvs = owned.filter(
     (p) => !state.constructions.some((c) => c.provinceId === p.id)
   );
-  if (freeProvinces.length === 0) return;
+  if (freeProvs.length === 0) return;
 
-  const totalFactories = owned.reduce((sum, p) => sum + p.buildings.factory, 0);
-
-  let targetProv: Province | undefined;
-  let building: BuildingType = 'factory';
-
-  // 1. Priorité absolue : au moins 2 usines pour débloquer chars & artillerie
-  if (totalFactories < 2) {
-    building = 'factory';
-    targetProv =
-      freeProvinces.find((p) => p.buildings.factory === 0 && p.isCapital) ??
-      freeProvinces
-        .filter((p) => p.buildings.factory < BUILDING_SPECS.factory.maxLevel)
-        .sort((a, b) => b.baseIncome.steel - a.baseIncome.steel)[0];
-  } else if (
-    nation.personality === 'fortress' ||
-    (borders.length > 0 && Math.random() < 0.35)
-  ) {
-    building = 'fort';
-    targetProv = borders.find(
-      (p) =>
-        p.buildings.fort < 2 &&
-        !state.constructions.some((c) => c.provinceId === p.id)
-    );
-  } else if (Math.random() < 0.55) {
-    building = 'railway';
-    targetProv = freeProvinces
-      .filter((p) => p.buildings.railway < 2)
-      .sort(
-        (a, b) =>
-          b.baseIncome.gold +
-          b.baseIncome.steel +
-          b.baseIncome.oil -
-          (a.baseIncome.gold + a.baseIncome.steel + a.baseIncome.oil)
-      )[0];
-  } else {
-    building = 'factory';
-    targetProv = freeProvinces.find((p) => p.buildings.factory < 2);
+  // Priorité A : monter le Laboratoire unique de la capitale
+  const capital = freeProvs.find((p) => p.hasLaboratory && p.laboratoryLevel < 3);
+  if (capital && Math.random() < 0.35) {
+    if (upgradeLaboratory(state, nationId, capital.id).ok) return;
   }
 
-  if (!targetProv) return;
+  // Priorité B : fortifier la capitale et les frontières exposées
+  const defenseTargets = [
+    ...(capital ? [capital] : []),
+    ...borders.filter((b) => freeProvs.some((f) => f.id === b.id)),
+  ];
+  for (const prov of defenseTargets) {
+    const defs: DefenseType[] = isCoastalProvince(prov)
+      ? ['bunkers', 'trenches', 'naval_defense', 'aa_defense']
+      : ['bunkers', 'trenches', 'aa_defense'];
 
-  const cost = getBuildingCost(building, targetProv.buildings[building]);
-  if (canAfford(nation.resources, cost)) {
-    startConstruction(state, nationId, targetProv.id, building);
+    for (const def of defs) {
+      if (prov.defenses[def] < nation.techLevels[def]) {
+        if (upgradeDefense(state, nationId, prov.id, def).ok) return;
+      }
+    }
+  }
+
+  // Priorité C : usines d'extraction débloquées
+  for (const res of ['gold', 'steel', 'gas'] as ExtractionResource[]) {
+    const techLvl = nation.techLevels[EXTRACTION_TECH_MAP[res]];
+    if (techLvl <= 0) continue;
+    const bestProv = freeProvs
+      .filter((p) => p.extractionFactories[res] < techLvl)
+      .sort((a, b) => b.baseIncome[res] - a.baseIncome[res])[0];
+    if (bestProv && upgradeExtractionFactory(state, nationId, bestProv.id, res).ok) return;
+  }
+
+  // Priorité D : Caserne peu chère sur la capitale ou une frontière
+  const barrackProv = freeProvs.find((p) => p.barracksLevel < 3);
+  if (barrackProv && Math.random() < 0.25) {
+    upgradeBarracks(state, nationId, barrackProv.id);
   }
 }
 
+/** 3. Recrutement équilibré pour tenir la défense et préparer des forces cohérentes */
 function tryAiRecruitment(
   state: GameState,
   nationId: PlayableNationId,
@@ -108,143 +158,166 @@ function tryAiRecruitment(
   if (activeCount >= 2) return;
 
   const nation = state.nations[nationId];
-  const factoryProvs = owned.filter((p) => p.buildings.factory >= 1);
-  const coastalFactory = factoryProvs.find(
-    (p) => p.terrain === 'coastal' || p.seaNeighbors.length > 0
-  );
+  const capital = owned.find((p) => p.isCapital);
 
-  const totalBattleships = owned.reduce((s, p) => s + p.garrison.battleship, 0);
-
-  let unit: UnitType = 'infantry';
-  let spawnProv: Province | undefined;
-
-  if (
-    NAVAL_POWERS.includes(nationId) &&
-    coastalFactory &&
-    totalBattleships < 2 &&
-    canAfford(nation.resources, UNIT_SPECS.battleship.cost) &&
-    Math.random() < 0.2
-  ) {
-    unit = 'battleship';
-    spawnProv = coastalFactory;
-  } else if (
-    factoryProvs.length > 0 &&
-    canAfford(nation.resources, UNIT_SPECS.tank.cost) &&
-    Math.random() < (nation.personality === 'expansionist' ? 0.45 : 0.28)
-  ) {
-    unit = 'tank';
-    spawnProv = factoryProvs[Math.floor(Math.random() * factoryProvs.length)];
-  } else if (
-    factoryProvs.length > 0 &&
-    canAfford(nation.resources, UNIT_SPECS.artillery.cost) &&
-    Math.random() < 0.28
-  ) {
-    unit = 'artillery';
-    spawnProv = factoryProvs[Math.floor(Math.random() * factoryProvs.length)];
-  } else if (canAfford(nation.resources, UNIT_SPECS.infantry.cost)) {
-    unit = 'infantry';
-    const pool = borders.length > 0 ? borders : owned;
-    // Renforce en priorité la province frontalière la moins garnie
-    spawnProv = [...pool].sort((a, b) => totalStack(a.garrison) - totalStack(b.garrison))[0];
+  // Toujours sécuriser une garnison sérieuse dans la capitale
+  if (capital && totalStack(capital.garrison) < 8 && canAfford(nation.resources, UNIT_SPECS.soldier.cost)) {
+    startRecruitment(state, nationId, capital.id, 'soldier', 1);
+    return;
   }
 
-  if (spawnProv) {
-    startRecruitment(state, nationId, spawnProv.id, unit, 1);
+  const coastal = owned.find((p) => isCoastalProvince(p));
+  const pool = borders.length > 0 ? borders : owned;
+  const weakestBorder = [...pool].sort((a, b) => totalStack(a.garrison) - totalStack(b.garrison))[0];
+
+  const roll = Math.random();
+  let unit: UnitType = 'soldier';
+  let spawn = weakestBorder;
+
+  if (coastal && roll < 0.14 && canAfford(nation.resources, UNIT_SPECS.frigate.cost)) {
+    unit = 'frigate';
+    spawn = coastal;
+  } else if (roll < 0.28 && canAfford(nation.resources, UNIT_SPECS.light_tank.cost)) {
+    unit = 'light_tank';
+  } else if (roll < 0.38 && canAfford(nation.resources, UNIT_SPECS.heavy_tank.cost)) {
+    unit = 'heavy_tank';
+  } else if (roll < 0.46 && canAfford(nation.resources, UNIT_SPECS.fighter.cost)) {
+    unit = 'fighter';
+  } else if (roll < 0.54 && canAfford(nation.resources, UNIT_SPECS.bomber.cost)) {
+    unit = 'bomber';
+  } else if (roll < 0.66 && canAfford(nation.resources, UNIT_SPECS.scout.cost)) {
+    unit = 'scout';
+  } else {
+    unit = 'soldier';
+  }
+
+  if (spawn && canAfford(nation.resources, UNIT_SPECS[unit].cost)) {
+    startRecruitment(state, nationId, spawn.id, unit, 1);
   }
 }
 
-function tryAiMovements(
+/** 4. Réaction défensive prioritaire + offensives calculées (fini les attaques compulsives) */
+function tryAiDefenseAndMovements(
   state: GameState,
   nationId: PlayableNationId,
   owned: Province[],
   borders: Province[]
 ): void {
+  const nation = state.nations[nationId];
   const activeMoves = state.movingArmies.filter((a) => a.owner === nationId).length;
   if (activeMoves >= 3) return;
 
-  const nation = state.nations[nationId];
-  const borderIds = new Set(borders.map((b) => b.id));
-
-  // 1. Redéploiement de l'arrière vers la frontière (actif en Mobilisation ET en Guerre)
-  const interior = owned.filter((p) => !borderIds.has(p.id));
-  for (const prov of interior) {
-    const keep = prov.isCapital ? 1 : 0;
-    const total = totalStack(prov.garrison);
-    if (total <= keep + 1) continue;
-
-    const frontNeighbor = [...prov.neighbors, ...prov.seaNeighbors]
-      .map((id) => state.provinces[id])
-      .find((nb) => nb && nb.owner === nationId && borderIds.has(nb.id));
-
-    if (!frontNeighbor) continue;
-
-    const isNaval = !prov.neighbors.includes(frontNeighbor.id);
-    const send: UnitStack = {
-      infantry: Math.max(0, prov.garrison.infantry - keep),
-      tank: prov.garrison.tank,
-      artillery: prov.garrison.artillery,
-      battleship: isNaval ? prov.garrison.battleship : 0,
-    };
-
-    if (totalStack(send) > 0) {
-      orderMoveArmy(state, nationId, prov.id, frontNeighbor.id, send);
-      break;
+  // A. URGENCE DÉFENSIVE : province attaquée ou débarquement sous-marin (10 s) en cours !
+  const threatenedIds = new Set<string>();
+  for (const b of state.battles) {
+    if (b.defender === nationId) threatenedIds.add(b.provinceId);
+  }
+  for (const m of state.movingArmies) {
+    if (
+      m.owner !== nationId &&
+      m.landingStartedAt !== undefined &&
+      state.provinces[m.toProvinceId]?.owner === nationId
+    ) {
+      threatenedIds.add(m.toProvinceId);
     }
   }
 
-  // 2. Offensives & bombardements (uniquement après la fin de la mobilisation)
-  if (state.phase !== 'WAR') return;
+  for (const threatId of threatenedIds) {
+    const donor = owned
+      .filter((p) => p.id !== threatId && !threatenedIds.has(p.id))
+      .filter((p) => totalStack(p.garrison) >= (p.isCapital ? 9 : 5))
+      .sort((a, b) => totalStack(b.garrison) - totalStack(a.garrison))[0];
 
-  const baseRatio =
+    if (donor) {
+      const send = createEmptyStack();
+      const keep = donor.isCapital ? 6 : 3;
+      const availableSoldiers = Math.max(0, donor.garrison.soldier - keep);
+      send.soldier = Math.ceil(availableSoldiers * 0.7);
+      send.light_tank = donor.garrison.light_tank;
+      send.heavy_tank = donor.garrison.heavy_tank;
+      if (totalStack(send) > 0) {
+        orderMoveArmy(state, nationId, donor.id, threatId, send);
+        return;
+      }
+    }
+  }
+
+  // B. Consolidation défensive : transférer le surplus de l'arrière vers la frontière la plus faible
+  const borderIds = new Set(borders.map((b) => b.id));
+  const weakestBorder = [...borders].sort(
+    (a, b) => totalStack(a.garrison) - totalStack(b.garrison)
+  )[0];
+
+  if (weakestBorder && totalStack(weakestBorder.garrison) < 5) {
+    const interiorDonor = owned.find(
+      (p) => !borderIds.has(p.id) && totalStack(p.garrison) >= (p.isCapital ? 10 : 4)
+    );
+    if (interiorDonor) {
+      const keep = interiorDonor.isCapital ? 7 : 2;
+      const send = createEmptyStack();
+      send.soldier = Math.max(0, interiorDonor.garrison.soldier - keep);
+      send.scout = interiorDonor.garrison.scout;
+      send.light_tank = interiorDonor.garrison.light_tank;
+      send.heavy_tank = interiorDonor.garrison.heavy_tank;
+      if (totalStack(send) > 0) {
+        orderMoveArmy(state, nationId, interiorDonor.id, weakestBorder.id, send);
+        return;
+      }
+    }
+  }
+
+  // C. Offensives réfléchies UNIQUEMENT après temporisation et avec nette supériorité
+  const cooldown =
+    state.aiDifficulty === 'hard'
+      ? AI_OFFENSIVE_COOLDOWN_SECONDS * 0.75
+      : AI_OFFENSIVE_COOLDOWN_SECONDS;
+
+  if (state.elapsedSeconds - (nation.lastAttackAt ?? 0) < cooldown) {
+    return;
+  }
+
+  const requiredRatio =
     nation.personality === 'expansionist'
-      ? 1.15
+      ? 1.55
       : nation.personality === 'opportunist'
-      ? 1.28
-      : nation.personality === 'diplomat'
-      ? 1.42
-      : 1.6;
+      ? 1.7
+      : 1.95;
 
-  const sortedBorders = [...borders].sort(
-    (a, b) => totalStack(b.garrison) - totalStack(a.garrison)
-  );
+  const readyBorders = borders
+    .filter((p) => totalStack(p.garrison) >= (p.isCapital ? 11 : 7))
+    .sort((a, b) => totalStack(b.garrison) - totalStack(a.garrison));
 
-  for (const prov of sortedBorders) {
-    if (totalStack(prov.garrison) < 3) continue;
-
-    const candidateIds = [...prov.neighbors, ...prov.seaNeighbors];
+  for (const prov of readyBorders) {
     let bestTarget: Province | null = null;
     let bestScore = -Infinity;
 
-    for (const targetId of candidateIds) {
+    for (const targetId of [...prov.neighbors, ...prov.seaNeighbors]) {
       const target = state.provinces[targetId];
       if (!target || target.owner === nationId) continue;
 
       const status = getDiplomaticStatus(state, nationId, target.owner);
-      if (status === 'alliance' || status === 'nap') continue;
+      if (status === 'alliance') continue;
 
-      const isSeaOnly = !prov.neighbors.includes(targetId);
-      const attStrength =
-        prov.garrison.infantry +
-        prov.garrison.tank * 2.4 +
-        prov.garrison.artillery * 1.4 +
-        (isSeaOnly ? prov.garrison.battleship * 2.5 : 0);
+      // Évalue les défenses adverses pour éviter les charges suicides
+      const bunkerFactor =
+        1 + getEffectiveDefenseLevel(target, 'bunkers', state.elapsedSeconds) * 0.55;
+      const trenchFactor =
+        1 + getEffectiveDefenseLevel(target, 'trenches', state.elapsedSeconds) * 0.45;
 
-      const defStrength =
-        Math.max(1, totalStack(target.garrison)) *
-        (1 + target.buildings.fort * 0.25) *
-        (target.terrain === 'mountain' ? 1.25 : 1.0);
+      const keepReserve = prov.isCapital ? 6 : 3;
+      const usableInf = Math.max(0, prov.garrison.soldier + prov.garrison.scout - keepReserve);
+      const usableArmor = prov.garrison.light_tank * 1.8 + prov.garrison.heavy_tank * 2.8;
 
-      let requiredRatio = baseRatio;
-      if (status === 'war') requiredRatio -= 0.15;
-      if (target.owner === 'neutral') requiredRatio -= 0.12;
+      const attScore = usableInf / bunkerFactor + usableArmor / trenchFactor;
+      const defScore = Math.max(2, totalStack(target.garrison) * 1.25);
 
-      if (attStrength < defStrength * requiredRatio) continue;
+      if (attScore < defScore * requiredRatio) continue;
 
       const score =
-        attStrength / defStrength +
-        target.victoryPoints * 0.45 +
-        (target.owner === 'neutral' ? 0.4 : 0) +
-        (status === 'war' ? 0.5 : 0);
+        attScore / defScore +
+        (target.isCapital ? 2.5 : 0) +
+        (status === 'war' ? 0.8 : 0) +
+        (target.owner === 'neutral' ? 0.35 : 0);
 
       if (score > bestScore) {
         bestScore = score;
@@ -254,142 +327,45 @@ function tryAiMovements(
 
     if (!bestTarget) continue;
 
-    // Pilonnage d'artillerie préalable si la cible est fortifiée ou bien défendue
-    if (
-      prov.garrison.artillery > 0 &&
-      (bestTarget.buildings.fort > 0 || totalStack(bestTarget.garrison) >= 3) &&
-      Math.random() < 0.45
-    ) {
-      const res = orderArtilleryBombardment(state, nationId, prov.id, bestTarget.id);
-      if (res.ok) return;
-    }
+    // Garde toujours une vraie garnison en défense sur la province de départ !
+    const keepSoldiers = prov.isCapital ? 5 : 2;
+    const send = createEmptyStack();
+    send.soldier = Math.max(0, prov.garrison.soldier - keepSoldiers);
+    send.scout = prov.garrison.scout;
+    send.light_tank = prov.garrison.light_tank;
+    send.heavy_tank = prov.garrison.heavy_tank;
+    send.bomber = prov.garrison.bomber;
+    send.fighter = prov.garrison.fighter;
 
-    const isSeaOnly = !prov.neighbors.includes(bestTarget.id);
-    const leaveInf = prov.isCapital || totalStack(prov.garrison) >= 4 ? 1 : 0;
-    const send: UnitStack = {
-      infantry: Math.max(0, prov.garrison.infantry - leaveInf),
-      tank: prov.garrison.tank,
-      artillery: prov.garrison.artillery,
-      battleship: isSeaOnly ? prov.garrison.battleship : 0,
-    };
-
-    if (totalStack(send) > 0) {
-      orderMoveArmy(state, nationId, prov.id, bestTarget.id, send);
-      return;
+    if (totalStack(send) >= 4) {
+      const res = orderMoveArmy(state, nationId, prov.id, bestTarget.id, send);
+      if (res.ok) {
+        nation.lastAttackAt = state.elapsedSeconds;
+        return;
+      }
     }
   }
 }
 
-function tryAiDiplomacy(
-  state: GameState,
-  nationId: PlayableNationId,
-  ownedCount: number
-): void {
-  if (state.elapsedSeconds < 40) return;
-  if (state.pendingOffers.length >= 2) return;
+/** 5. Initiatives diplomatiques IA (max 1 alliance, pas de PNA) */
+function tryAiDiplomacy(state: GameState, nationId: PlayableNationId): void {
+  if (state.elapsedSeconds < 90) return;
+  const nation = state.nations[nationId];
+  if (nation.activeAllianceWith !== null) return;
+  if (nation.resources.gold < GAME_CONFIG.allianceCostGold + 150) return;
   if (state.pendingOffers.some((o) => o.from === nationId)) return;
 
-  const nation = state.nations[nationId];
   const playerId = state.playerNationId;
+  const player = state.nations[playerId];
+  if (!player || player.isEliminated || player.activeAllianceWith !== null) return;
+
   const status = getDiplomaticStatus(state, nationId, playerId);
-
-  const playerCount = Object.values(state.provinces).filter(
-    (p) => p.owner === playerId
-  ).length;
-
-  let offerType: 'nap' | 'alliance' | 'peace' | null = null;
-
-  if (status === 'war' && ownedCount < playerCount && Math.random() < 0.06) {
-    offerType = 'peace';
-  } else if (status === 'neutral') {
-    const chance =
-      nation.personality === 'diplomat'
-        ? 0.045
-        : nation.personality === 'fortress'
-        ? 0.025
-        : 0.012;
-    if (Math.random() < chance) {
-      offerType =
-        state.elapsedSeconds > 200 && nation.personality === 'diplomat'
-          ? 'alliance'
-          : 'nap';
-    }
-  } else if (status === 'nap' && state.elapsedSeconds > 180 && Math.random() < 0.02) {
-    offerType = 'alliance';
+  if (status === 'neutral' && nation.personality === 'diplomat' && Math.random() < 0.015) {
+    requestDiplomaticAction(state, nationId, playerId, 'alliance');
   }
-
-  if (!offerType) return;
-
-  state.pendingOffers.push({
-    id: createId('dip'),
-    from: nationId,
-    to: playerId,
-    type: offerType,
-    createdAt: state.elapsedSeconds,
-    expiresAt: state.elapsedSeconds + 60,
-  });
-
-  const label =
-    offerType === 'alliance'
-      ? 'une Alliance militaire'
-      : offerType === 'nap'
-      ? 'un Pacte de non-agression'
-      : 'un Traité de paix';
-
-  pushTelegram(
-    state,
-    `Diplomatie : ${NATION_TEMPLATES[nationId].shortName} vous propose ${label} (onglet Diplomatie).`,
-    'diplomacy'
-  );
-}
-
-export function respondToDiplomaticOffer(
-  state: GameState,
-  offerId: string,
-  accept: boolean
-): { ok: boolean; reason?: string } {
-  const idx = state.pendingOffers.findIndex((o) => o.id === offerId);
-  if (idx === -1) return { ok: false, reason: 'Offre expirée ou introuvable.' };
-
-  const offer = state.pendingOffers[idx];
-  state.pendingOffers.splice(idx, 1);
-
-  const senderName = NATION_TEMPLATES[offer.from].shortName;
-
-  if (!accept) {
-    pushTelegram(state, `Proposition de ${senderName} déclinée.`, 'diplomacy');
-    return { ok: true };
-  }
-
-  const nextStatus = offer.type === 'peace' ? 'neutral' : offer.type;
-  setDiplomaticStatus(state, offer.from, offer.to, nextStatus);
-
-  // Stoppe immédiatement les combats entre les deux puissances signataires
-  state.battles = state.battles.filter(
-    (b) =>
-      !(
-        (b.attacker === offer.from && b.defender === offer.to) ||
-        (b.attacker === offer.to && b.defender === offer.from)
-      )
-  );
-
-  const text =
-    offer.type === 'alliance'
-      ? `Alliance officielle scellée avec ${senderName} !`
-      : offer.type === 'nap'
-      ? `Pacte de non-agression signé avec ${senderName}.`
-      : `Traité de paix signé avec ${senderName}.`;
-
-  pushTelegram(state, text, 'diplomacy');
-  return { ok: true };
 }
 
 export function tickAI(state: GameState): void {
-  // Nettoie les offres diplomatiques expirées
-  state.pendingOffers = state.pendingOffers.filter(
-    (o) => o.expiresAt > state.elapsedSeconds
-  );
-
   if (state.elapsedSeconds - state.lastAiTickAt < AI_THINK_INTERVAL_SECONDS) {
     return;
   }
@@ -406,9 +382,10 @@ export function tickAI(state: GameState): void {
 
     const borders = owned.filter((p) => isBorderProvince(state, p, nationId));
 
+    tryAiResearch(state, nationId);
     tryAiConstruction(state, nationId, owned, borders);
     tryAiRecruitment(state, nationId, owned, borders);
-    tryAiMovements(state, nationId, owned, borders);
-    tryAiDiplomacy(state, nationId, owned.length);
+    tryAiDefenseAndMovements(state, nationId, owned, borders);
+    tryAiDiplomacy(state, nationId);
   }
 }

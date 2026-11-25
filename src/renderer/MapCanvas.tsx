@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Compass, Globe, Handshake, Minus, Plus } from 'lucide-react';
-import { isPointOnLand, MAP_HEIGHT, MAP_WIDTH } from '../data/geo';
 import type { GameState } from '../engine/types';
+import { isPointOnLand, MAP_HEIGHT, MAP_WIDTH } from '../data/geo';
 import { drawMap, hitTestProvince, type Camera, type MapMode } from './drawMap';
+
+type PointerPos = { x: number; y: number };
+type PointerMap = Map<number, PointerPos>;
 
 interface MapCanvasProps {
   state: GameState;
@@ -18,13 +20,14 @@ export function MapCanvas({
   focusTarget,
 }: MapCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [camera, setCamera] = useState<Camera>({ x: 920, y: 920, zoom: 0.68 });
+  const [camera, setCamera] = useState<Camera>({ x: 920, y: 920, zoom: 0.72 });
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [mapMode, setMapMode] = useState<MapMode>('political');
 
-  // Gestion multi-touch (glisser-déposer + pincement à deux doigts)
-  const pointersRef = useRef(new Map<number, { x: number; y: number }>());
-  const pinchDistRef = useRef<number | null>(null);
+  const pointersRef = useRef<PointerMap>(new Map());
+  const pinchStartDistRef = useRef<number | null>(null);
+  const pinchStartZoomRef = useRef<number>(0.72);
+
   const dragRef = useRef<{
     active: boolean;
     moved: boolean;
@@ -56,19 +59,14 @@ export function MapCanvas({
     };
   };
 
-  const hasActiveAnimations =
-    state.battles.length > 0 ||
-    state.movingArmies.some(
-      (a) =>
-        a.owner !== state.playerNationId &&
-        state.provinces[a.toProvinceId]?.owner === state.playerNationId
-    );
-
+  // Boucle de rendu fluide 60 FPS (drapeaux, marche des unités, combats)
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const render = () => {
+    let rafId = 0;
+
+    const render = (now: number) => {
       const parent = canvas.parentElement;
       if (!parent) return;
       const dpr = window.devicePixelRatio || 1;
@@ -81,42 +79,26 @@ export function MapCanvas({
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      drawMap(ctx, w, h, camera, state, selectedProvinceId, hoveredId, mapMode);
+      drawMap(ctx, w, h, camera, state, selectedProvinceId, hoveredId, mapMode, now);
+      rafId = window.requestAnimationFrame(render);
     };
 
-    let rafId = 0;
-    if (hasActiveAnimations) {
-      const loop = () => {
-        render();
-        rafId = window.requestAnimationFrame(loop);
-      };
-      rafId = window.requestAnimationFrame(loop);
-    } else {
-      render();
-    }
-
-    window.addEventListener('resize', render);
-    return () => {
-      window.cancelAnimationFrame(rafId);
-      window.removeEventListener('resize', render);
-    };
-  }, [camera, state, selectedProvinceId, hoveredId, mapMode, hasActiveAnimations]);
+    rafId = window.requestAnimationFrame(render);
+    return () => window.cancelAnimationFrame(rafId);
+  }, [camera, state, selectedProvinceId, hoveredId, mapMode]);
 
   const clampCamera = (x: number, y: number, zoom: number): Camera => ({
     x: Math.min(MAP_WIDTH - 120, Math.max(120, x)),
     y: Math.min(MAP_HEIGHT - 120, Math.max(120, y)),
-    zoom: Math.min(2.2, Math.max(0.45, zoom)),
+    zoom: Math.min(2.3, Math.max(0.45, zoom)),
   });
 
-  const handleRecenterCapital = () => {
-    const capital =
-      Object.values(state.provinces).find(
-        (p) => p.owner === state.playerNationId && p.isCapital
-      ) ?? Object.values(state.provinces).find((p) => p.owner === state.playerNationId);
-
-    if (capital) {
-      setCamera((prev) => clampCamera(capital.center[0], capital.center[1], Math.max(prev.zoom, 0.95)));
-      onSelectProvince(capital.id);
+  const recenterOnCapital = () => {
+    const cap = Object.values(state.provinces).find(
+      (p) => p.owner === state.playerNationId && p.isCapital
+    );
+    if (cap) {
+      setCamera((prev) => clampCamera(cap.center[0], cap.center[1], Math.max(prev.zoom, 0.95)));
     }
   };
 
@@ -126,9 +108,9 @@ export function MapCanvas({
 
     if (pointersRef.current.size === 2) {
       const pts = Array.from(pointersRef.current.values());
-      pinchDistRef.current = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      pinchStartDistRef.current = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      pinchStartZoomRef.current = camera.zoom;
       dragRef.current.active = false;
-      dragRef.current.moved = true;
       return;
     }
 
@@ -147,15 +129,11 @@ export function MapCanvas({
       pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     }
 
-    // Pinch-to-zoom sur écran tactile
-    if (pointersRef.current.size === 2 && pinchDistRef.current !== null) {
+    if (pointersRef.current.size === 2 && pinchStartDistRef.current) {
       const pts = Array.from(pointersRef.current.values());
       const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
-      if (dist > 0) {
-        const ratio = dist / pinchDistRef.current;
-        pinchDistRef.current = dist;
-        setCamera((prev) => clampCamera(prev.x, prev.y, prev.zoom * ratio));
-      }
+      const ratio = dist / pinchStartDistRef.current;
+      setCamera((prev) => clampCamera(prev.x, prev.y, pinchStartZoomRef.current * ratio));
       return;
     }
 
@@ -181,7 +159,7 @@ export function MapCanvas({
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
     pointersRef.current.delete(e.pointerId);
     if (pointersRef.current.size < 2) {
-      pinchDistRef.current = null;
+      pinchStartDistRef.current = null;
     }
 
     const wasMoved = dragRef.current.moved;
@@ -211,76 +189,46 @@ export function MapCanvas({
         onWheel={handleWheel}
       />
 
-      {/* Barre d'outils cartographiques (en haut à gauche, sans chevauchement) */}
+      {/* Barre d'outils cartographiques (haut gauche) */}
       <div className="absolute left-3 top-16 z-10 flex flex-col gap-1.5 font-sans">
-        <div className="flex items-center gap-1 rounded-lg border border-amber-200/30 bg-stone-950/90 p-1 shadow-xl backdrop-blur-sm">
+        <div className="flex gap-1">
           <button
+            type="button"
             onClick={() => setCamera((c) => clampCamera(c.x, c.y, c.zoom * 1.2))}
-            className="flex h-8 w-8 items-center justify-center rounded text-amber-100 hover:bg-stone-800"
+            className="h-8 w-8 rounded border border-amber-200/30 bg-stone-900/90 font-bold text-amber-100 hover:bg-stone-800"
             title="Zoomer"
           >
-            <Plus className="h-4 w-4" />
+            +
           </button>
           <button
+            type="button"
             onClick={() => setCamera((c) => clampCamera(c.x, c.y, c.zoom * 0.85))}
-            className="flex h-8 w-8 items-center justify-center rounded text-amber-100 hover:bg-stone-800"
+            className="h-8 w-8 rounded border border-amber-200/30 bg-stone-900/90 font-bold text-amber-100 hover:bg-stone-800"
             title="Dézoomer"
           >
-            <Minus className="h-4 w-4" />
+            −
           </button>
-
-          <div className="mx-0.5 h-5 w-px bg-stone-700" />
-
           <button
-            onClick={handleRecenterCapital}
-            className="flex h-8 w-8 items-center justify-center rounded text-amber-200 hover:bg-stone-800"
-            title="Recentrer sur votre capitale"
+            type="button"
+            onClick={recenterOnCapital}
+            className="h-8 rounded border border-amber-200/30 bg-stone-900/90 px-2.5 text-xs font-semibold text-amber-100 hover:bg-stone-800"
+            title="Recentrer sur ma capitale"
           >
-            <Compass className="h-4 w-4" />
-          </button>
-
-          <div className="mx-0.5 h-5 w-px bg-stone-700" />
-
-          <button
-            onClick={() => setMapMode((m) => (m === 'political' ? 'diplomatic' : 'political'))}
-            className={`flex h-8 items-center gap-1.5 rounded px-2.5 text-xs font-semibold transition ${
-              mapMode === 'diplomatic'
-                ? 'bg-amber-600 text-stone-950'
-                : 'text-amber-100 hover:bg-stone-800'
-            }`}
-            title="Basculer entre la carte politique et la carte diplomatique"
-          >
-            {mapMode === 'diplomatic' ? (
-              <>
-                <Handshake className="h-3.5 w-3.5" />
-                <span>Diplomatique</span>
-              </>
-            ) : (
-              <>
-                <Globe className="h-3.5 w-3.5" />
-                <span>Politique</span>
-              </>
-            )}
+            ★ Capitale
           </button>
         </div>
 
-        {/* Légende rapide en mode Diplomatique */}
-        {mapMode === 'diplomatic' && (
-          <div className="flex flex-wrap items-center gap-2.5 rounded-lg border border-amber-200/25 bg-stone-950/90 px-2.5 py-1.5 text-[11px] text-stone-200 shadow-lg backdrop-blur-sm">
-            <span className="flex items-center gap-1">
-              <span className="h-2.5 w-2.5 rounded-full bg-green-600" /> Vous
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="h-2.5 w-2.5 rounded-full bg-teal-600" /> Allié
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="h-2.5 w-2.5 rounded-full bg-sky-600" /> PNA
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="h-2.5 w-2.5 rounded-full bg-red-600" /> Guerre
-            </span>
-          </div>
-        )}
+        <button
+          type="button"
+          onClick={() => setMapMode((m) => (m === 'political' ? 'diplomatic' : 'political'))}
+          className={`rounded border px-2.5 py-1 text-xs font-semibold transition ${
+            mapMode === 'diplomatic'
+              ? 'border-sky-400/60 bg-sky-950/90 text-sky-200'
+              : 'border-amber-200/30 bg-stone-900/90 text-amber-100 hover:bg-stone-800'
+          }`}
+        >
+          Carte : {mapMode === 'political' ? 'Politique' : 'Diplomatique'}
+        </button>
       </div>
     </div>
   );

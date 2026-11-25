@@ -62,7 +62,8 @@ export function getTravelDurationSeconds(
   owner: NationId,
   from: Province,
   units: UnitStack,
-  isNaval: boolean
+  isNaval: boolean,
+  to?: Province
 ): number {
   const nation = state.nations[owner];
   const lowOil = nation ? nation.resources.oil < 5 : false;
@@ -80,12 +81,17 @@ export function getTravelDurationSeconds(
 
   if (slowest === 0) slowest = UNIT_SPECS.infantry.travelSeconds;
 
-  // Bonus des voies ferrées / port au départ (-20 % par niveau)
-  const railMultiplier = 1 / (1 + from.buildings.railway * 0.2);
+  // Bonus des voies ferrées / port au départ (+30 % / niv.) et à l'arrivée (+15 % / niv. si allié)
+  const destRailBonus =
+    to && (to.owner === owner || getDiplomaticStatus(state, owner, to.owner) === 'alliance')
+      ? to.buildings.railway * 0.15
+      : 0;
+  const railMultiplier = 1 / (1 + from.buildings.railway * 0.3 + destRailBonus);
+
   // Traversée maritime légèrement plus longue sans escorte de cuirassé
   const navalMultiplier = isNaval ? (units.battleship > 0 ? 1.05 : 1.3) : 1.0;
 
-  return Math.max(15, Math.round(slowest * railMultiplier * navalMultiplier));
+  return Math.max(12, Math.round(slowest * railMultiplier * navalMultiplier));
 }
 
 export function orderMoveArmy(
@@ -156,7 +162,7 @@ export function orderMoveArmy(
   from.garrison.artillery -= send.artillery;
   from.garrison.battleship -= send.battleship;
 
-  const duration = getTravelDurationSeconds(state, owner, from, send, isNaval);
+  const duration = getTravelDurationSeconds(state, owner, from, send, isNaval, to);
   state.movingArmies.push({
     id: createId('mov'),
     owner,
@@ -306,7 +312,8 @@ function computeStackPower(
   }
 
   if (isDefender) {
-    const fortBonus = 1 + province.buildings.fort * 0.25;
+    // Fortification : +35 % de puissance défensive par niveau
+    const fortBonus = 1 + province.buildings.fort * 0.35;
     const moraleBonus = 0.75 + (province.morale / 100) * 0.25;
     power *= terrain.defenseBonus * fortBonus * moraleBonus;
   }
@@ -433,8 +440,11 @@ export function tickMovementsAndCombat(state: GameState): void {
 
     battle.lastTickAt = state.elapsedSeconds;
 
+    // Casemates & tranchées réduisent de 15 % par niveau les pertes encaissées
+    const fortProtection = Math.max(0.45, 1 - prov.buildings.fort * 0.15);
+
     if (battle.isBombardment) {
-      const attPower = computeStackPower(battle.attackerUnits, prov, false) * 0.7;
+      const attPower = computeStackPower(battle.attackerUnits, prov, false) * 0.7 * fortProtection;
       applyDamageToStack(prov.garrison, attPower);
       prov.morale = Math.max(25, prov.morale - 3);
       if (prov.buildings.fort > 0 && Math.random() < 0.25) {
@@ -449,7 +459,7 @@ export function tickMovementsAndCombat(state: GameState): void {
       continue;
     }
 
-    const attPower = computeStackPower(battle.attackerUnits, prov, false);
+    const attPower = computeStackPower(battle.attackerUnits, prov, false) * fortProtection;
     const defPower = computeStackPower(prov.garrison, prov, true);
 
     applyDamageToStack(prov.garrison, attPower * (0.85 + Math.random() * 0.3));

@@ -46,11 +46,13 @@ export function getNationIncomePerMinute(state: GameState, nationId: NationId): 
   for (const prov of Object.values(state.provinces)) {
     if (prov.owner !== nationId) continue;
     const moraleFactor = 0.5 + (prov.morale / 100) * 0.5;
-    const railFactor = 1 + prov.buildings.railway * 0.15;
-    const mult = moraleFactor * railFactor;
-    total.gold += prov.baseIncome.gold * mult;
-    total.steel += prov.baseIncome.steel * mult;
-    total.oil += prov.baseIncome.oil * mult;
+    const railFactor = 1 + prov.buildings.railway * 0.2;
+    const factoryGoldFactor = 1 + prov.buildings.factory * 0.15;
+    const factorySteelFactor = 1 + prov.buildings.factory * 0.25;
+
+    total.gold += prov.baseIncome.gold * moraleFactor * railFactor * factoryGoldFactor;
+    total.steel += prov.baseIncome.steel * moraleFactor * railFactor * factorySteelFactor;
+    total.oil += prov.baseIncome.oil * moraleFactor * railFactor;
   }
   return {
     gold: Math.round(total.gold),
@@ -140,8 +142,8 @@ export function startRecruitment(
 
   spendResources(nation.resources, totalCost);
 
-  const factorySpeedFactor = Math.max(0.45, 1 - prov.buildings.factory * 0.18);
-  const duration = Math.max(6, Math.round(spec.trainSeconds * factorySpeedFactor * count));
+  const factorySpeedFactor = Math.max(0.35, 1 - prov.buildings.factory * 0.22);
+  const duration = Math.max(5, Math.round(spec.trainSeconds * factorySpeedFactor * count));
 
   state.recruitments.push({
     id: createId('rec'),
@@ -168,17 +170,20 @@ export function tickEconomy(state: GameState, dtSeconds: number): void {
     if (!nation || prov.owner === 'neutral') continue;
 
     const moraleFactor = 0.5 + (prov.morale / 100) * 0.5;
-    const railFactor = 1 + prov.buildings.railway * 0.15;
-    const mult = moraleFactor * railFactor * minuteFraction;
+    const railFactor = 1 + prov.buildings.railway * 0.2;
+    const factoryGoldFactor = 1 + prov.buildings.factory * 0.15;
+    const factorySteelFactor = 1 + prov.buildings.factory * 0.25;
+    const baseMult = moraleFactor * railFactor * minuteFraction;
 
-    nation.resources.gold += prov.baseIncome.gold * mult;
-    nation.resources.steel += prov.baseIncome.steel * mult;
-    nation.resources.oil += prov.baseIncome.oil * mult;
+    nation.resources.gold += prov.baseIncome.gold * baseMult * factoryGoldFactor;
+    nation.resources.steel += prov.baseIncome.steel * baseMult * factorySteelFactor;
+    nation.resources.oil += prov.baseIncome.oil * baseMult;
 
-    // Remontée progressive du moral hors combat (vers 90 %)
+    // Remontée progressive du moral hors combat (accélérée par les voies ferrées et forts)
     const underAttack = state.battles.some((b) => b.provinceId === prov.id);
     if (!underAttack && prov.morale < 90) {
-      prov.morale = Math.min(90, prov.morale + 0.12 * dtSeconds);
+      const moraleRegen = 0.12 + prov.buildings.railway * 0.08 + prov.buildings.fort * 0.04;
+      prov.morale = Math.min(90, prov.morale + moraleRegen * dtSeconds);
     }
   }
 

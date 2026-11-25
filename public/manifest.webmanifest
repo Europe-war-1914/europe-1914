@@ -1,0 +1,21 @@
+{
+  "name": "1914 : L'Europe en Flammes",
+  "short_name": "1914 Europe",
+  "description": "Jeu de grande stratégie multijoueur en temps réel sur la Première Guerre mondiale.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0c0a09",
+  "theme_color": "#0c0a09",
+  "lang": "fr",
+  "categories": ["games", "strategy"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

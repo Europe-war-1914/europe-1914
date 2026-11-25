@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
-import { Crown, LogIn, LogOut, Trophy, User, Users, X } from 'lucide-react';
+import { Crown, Eye, LogIn, LogOut, Skull, Trophy, User, Users, X } from 'lucide-react';
 import { soundEngine } from './audio/soundEngine';
 import { NATION_TEMPLATES, PLAYABLE_NATIONS } from './data/nations';
 import { respondToDiplomaticOffer } from './engine/ai';
@@ -37,10 +37,23 @@ import { MapCanvas } from './renderer/MapCanvas';
 import { MAP_THEMES, type MapThemeId } from './renderer/mapThemes';
 import { AuthModal } from './ui/AuthModal';
 import { CommandTabs } from './ui/CommandTabs';
+import { LeaderboardModal } from './ui/LeaderboardModal';
 import { OnlineLobby } from './ui/OnlineLobby';
 import { ProvinceDrawer } from './ui/ProvinceDrawer';
 import { ShopModal } from './ui/ShopModal';
 import { TopBar } from './ui/TopBar';
+
+interface MatchEloDelta {
+  oldElo: number;
+  newElo: number;
+  delta: number;
+  rank: number;
+  isWinner: boolean;
+  botsAlive: number;
+  humansAlive: number;
+  botsEliminated: number;
+  humansEliminated: number;
+}
 
 const SERVER_URL =
   (import.meta.env.VITE_SERVER_URL as string | undefined) ?? 'http://localhost:3001';
@@ -87,8 +100,9 @@ export default function App() {
   const [focusTarget, setFocusTarget] = useState<[number, number] | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [muted, setMuted] = useState<boolean>(() => soundEngine.isMuted());
+  const [observerDismissed, setObserverDismissed] = useState(false);
 
-  // Compte joueur Supabase & Boutique / Thèmes
+  // Compte joueur Supabase, Classement & Boutique / Thèmes
   const [authUser, setAuthUser] = useState<{
     id: string;
     username: string;
@@ -98,6 +112,8 @@ export default function App() {
   const [profileNonce, setProfileNonce] = useState(0);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [shopModalOpen, setShopModalOpen] = useState(false);
+  const [leaderboardOpen, setLeaderboardOpen] = useState(false);
+  const [eloResults, setEloResults] = useState<Record<string, MatchEloDelta>>({});
   const [mapTheme, setMapTheme] = useState<MapThemeId>(() => {
     const saved = window.localStorage.getItem('europe1914_theme');
     return saved === 'night' || saved === 'tactical' ? saved : 'vintage';
@@ -176,7 +192,7 @@ export default function App() {
     };
   }, []);
 
-  // 2. Chargement du profil (séparé de onAuthStateChange pour éviter le blocage)
+  // 2. Chargement du profil
   useEffect(() => {
     if (!supabase || !authUser) return;
     const client = supabase;
@@ -323,6 +339,11 @@ export default function App() {
       }
     });
 
+    socket.on('game:elo', (results: Record<string, MatchEloDelta>) => {
+      setEloResults(results);
+      setProfileNonce((n) => n + 1);
+    });
+
     socket.on('game:state', (incoming: GameState) => {
       setIsOnlineMatch(true);
       setState(incoming);
@@ -333,6 +354,8 @@ export default function App() {
 
       if (!hasCenteredOnlineRef.current) {
         hasCenteredOnlineRef.current = true;
+        setObserverDismissed(false);
+        setEloResults({});
         const capital = Object.values(incoming.provinces).find(
           (p) => p.owner === incoming.playerNationId && p.isCapital
         );
@@ -405,6 +428,8 @@ export default function App() {
     prevPlayerBattlesRef.current = 0;
 
     window.sessionStorage.removeItem(ACTIVE_ROOM_KEY);
+    setObserverDismissed(false);
+    setEloResults({});
     setIsOnlineMatch(false);
     setChatMessages([]);
     setState(fresh);
@@ -445,6 +470,8 @@ export default function App() {
     }
     window.sessionStorage.removeItem(ACTIVE_ROOM_KEY);
     hasCenteredOnlineRef.current = false;
+    setObserverDismissed(false);
+    setEloResults({});
     setIsOnlineMatch(false);
     setRoom(null);
     setChatMessages([]);
@@ -552,7 +579,7 @@ export default function App() {
     return (
       <div className="flex min-h-dvh w-full flex-col items-center justify-start sm:justify-center bg-stone-950 p-3 pb-12 sm:p-4 text-amber-50 font-sans overflow-y-auto touch-pan-y">
         <div className="w-full max-w-4xl rounded-xl border border-amber-200/30 bg-stone-900/95 p-4 sm:p-6 shadow-2xl">
-          {/* Barre de compte joueur (Supabase) + Boutique */}
+          {/* Barre de compte joueur (Supabase) + Classement + Boutique */}
           {isSupabaseConfigured && (
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-stone-800 bg-stone-950/80 px-3 py-2 text-xs">
               {profile ? (
@@ -572,7 +599,15 @@ export default function App() {
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setLeaderboardOpen(true)}
+                      className="flex items-center gap-1.5 rounded border border-stone-700 bg-stone-900 px-2.5 py-1 font-semibold text-amber-100 hover:bg-stone-800"
+                    >
+                      <Trophy className="h-3.5 w-3.5 text-amber-400" />
+                      Classement
+                    </button>
                     <button
                       type="button"
                       onClick={() => setShopModalOpen(true)}
@@ -596,7 +631,15 @@ export default function App() {
                   <span className="text-stone-400">
                     Mode Invité — connectez-vous pour sauvegarder votre ELO et vos packs.
                   </span>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setLeaderboardOpen(true)}
+                      className="flex items-center gap-1.5 rounded border border-stone-700 bg-stone-900 px-2.5 py-1 font-semibold text-amber-100 hover:bg-stone-800"
+                    >
+                      <Trophy className="h-3.5 w-3.5 text-amber-400" />
+                      Classement
+                    </button>
                     <button
                       type="button"
                       onClick={() => setShopModalOpen(true)}
@@ -819,6 +862,13 @@ export default function App() {
           />
         )}
 
+        {leaderboardOpen && (
+          <LeaderboardModal
+            currentUserId={profile?.id}
+            onClose={() => setLeaderboardOpen(false)}
+          />
+        )}
+
         {shopModalOpen && (
           <ShopModal
             profile={profile}
@@ -841,6 +891,9 @@ export default function App() {
   const tutorial =
     !isOnlineMatch && state.tutorialStep > 0 ? TUTORIAL_STEPS[state.tutorialStep] : null;
   const finalStandings = state.phase === 'ENDED' ? getVictoryStandings(state).standings : null;
+  const myEloDelta = eloResults[state.playerNationId] ?? null;
+  const isPlayerEliminated =
+    Boolean(state.nations[state.playerNationId]?.isEliminated) && state.phase !== 'ENDED';
 
   return (
     <div className={`relative h-dvh w-screen overflow-hidden ${MAP_THEMES[mapTheme].bgClass} text-amber-50`}>
@@ -965,6 +1018,78 @@ export default function App() {
         }
       />
 
+      {/* Modale d'élimination (chute de la capitale) + détail ELO */}
+      {isPlayerEliminated && !observerDismissed && (
+        <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm font-sans">
+          <div className="w-full max-w-md rounded-xl border border-red-500/50 bg-stone-900 p-6 text-center shadow-2xl">
+            <Skull className="mx-auto h-10 w-10 text-red-400" />
+            <h2 className="mt-2 font-serif text-2xl font-bold text-red-200">
+              Votre capitale est tombée !
+            </h2>
+            <p className="mt-1 text-xs text-stone-300">
+              {NATION_TEMPLATES[state.playerNationId].name} est éliminée de la guerre.
+            </p>
+
+            {isOnlineMatch && myEloDelta && (
+              <div className="mt-4 rounded-lg border border-stone-800 bg-stone-950/90 p-3 text-xs">
+                <div className="flex items-center justify-center gap-2 font-mono text-sm">
+                  <span className="text-stone-400">ELO :</span>
+                  <span className="text-amber-100">{myEloDelta.oldElo}</span>
+                  <span className="text-stone-500">→</span>
+                  <span className="font-bold text-amber-300">{myEloDelta.newElo}</span>
+                  <span
+                    className={
+                      myEloDelta.delta >= 0
+                        ? 'font-bold text-emerald-400'
+                        : 'font-bold text-red-400'
+                    }
+                  >
+                    ({myEloDelta.delta >= 0 ? `+${myEloDelta.delta}` : myEloDelta.delta})
+                  </span>
+                </div>
+                <div className="mt-2 space-y-1 border-t border-stone-800 pt-2 text-[11px] text-stone-400">
+                  <div className="flex justify-between">
+                    <span>Bots encore en vie ({myEloDelta.botsAlive} × -4)</span>
+                    <span className="font-mono text-red-300">-{myEloDelta.botsAlive * 4}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Joueurs encore en vie ({myEloDelta.humansAlive} × -3)</span>
+                    <span className="font-mono text-red-300">-{myEloDelta.humansAlive * 3}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Bots éliminés avant vous ({myEloDelta.botsEliminated} × +2)</span>
+                    <span className="font-mono text-emerald-300">+{myEloDelta.botsEliminated * 2}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Joueurs éliminés avant vous ({myEloDelta.humansEliminated} × +3)</span>
+                    <span className="font-mono text-emerald-300">+{myEloDelta.humansEliminated * 3}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="mt-5 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => setObserverDismissed(true)}
+                className="flex items-center justify-center gap-1.5 rounded-lg border border-stone-700 bg-stone-800 py-2.5 text-xs font-bold text-amber-100 hover:bg-stone-700"
+              >
+                <Eye className="h-3.5 w-3.5" />
+                Observer la fin
+              </button>
+              <button
+                type="button"
+                onClick={handleReturnToLobby}
+                className="rounded-lg bg-amber-600 py-2.5 font-serif text-xs font-bold text-stone-950 hover:bg-amber-500"
+              >
+                Retourner au Lobby
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modale de fin de partie */}
       {state.phase === 'ENDED' && state.winnerId && finalStandings && (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm font-sans">
           <div className="w-full max-w-md rounded-xl border border-amber-400/50 bg-stone-900 p-6 text-center shadow-2xl">
@@ -975,18 +1100,66 @@ export default function App() {
                 : `Victoire : ${NATION_TEMPLATES[state.winnerId].name}`}
             </h2>
 
-            <div className="mt-4 space-y-1.5 text-left text-xs">
-              {finalStandings.slice(0, 5).map((row, idx) => (
-                <div
-                  key={row.nationId}
-                  className="flex items-center justify-between rounded bg-stone-950/80 px-3 py-1.5"
-                >
-                  <span>
-                    #{idx + 1} {NATION_TEMPLATES[row.nationId].shortName}
+            {isOnlineMatch && myEloDelta && (
+              <div className="mt-3 rounded-lg border border-amber-400/30 bg-stone-950/90 p-3 text-xs">
+                <div className="flex items-center justify-center gap-2 font-mono text-sm">
+                  <span className="text-stone-400">ELO :</span>
+                  <span className="text-amber-100">{myEloDelta.oldElo}</span>
+                  <span className="text-stone-500">→</span>
+                  <span className="font-bold text-amber-300">{myEloDelta.newElo}</span>
+                  <span
+                    className={
+                      myEloDelta.delta >= 0
+                        ? 'font-bold text-emerald-400'
+                        : 'font-bold text-red-400'
+                    }
+                  >
+                    ({myEloDelta.delta >= 0 ? `+${myEloDelta.delta}` : myEloDelta.delta})
                   </span>
-                  <span className="font-bold text-amber-300">{row.victoryPoints} PV</span>
                 </div>
-              ))}
+                {myEloDelta.isWinner && (
+                  <p className="mt-1 text-[11px] text-emerald-300">
+                    {myEloDelta.botsEliminated} bot(s) (+{myEloDelta.botsEliminated * 2}) •{' '}
+                    {myEloDelta.humansEliminated} joueur(s) (+{myEloDelta.humansEliminated * 3}) •
+                    Bonus victoire (+5)
+                  </p>
+                )}
+              </div>
+            )}
+
+            {isOnlineMatch && !profile && (
+              <p className="mt-2 text-[11px] text-stone-400">
+                Connectez-vous dans le lobby pour enregistrer votre score ELO.
+              </p>
+            )}
+
+            <div className="mt-4 space-y-1.5 text-left text-xs">
+              {finalStandings.slice(0, 5).map((row, idx) => {
+                const rowElo = eloResults[row.nationId];
+                return (
+                  <div
+                    key={row.nationId}
+                    className="flex items-center justify-between rounded bg-stone-950/80 px-3 py-1.5"
+                  >
+                    <span>
+                      #{idx + 1} {NATION_TEMPLATES[row.nationId].shortName}{' '}
+                      {row.isEliminated ? '(Éliminé)' : ''}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      {rowElo && (
+                        <span
+                          className={`font-mono text-[11px] ${
+                            rowElo.delta >= 0 ? 'text-emerald-400' : 'text-red-400'
+                          }`}
+                        >
+                          {rowElo.delta >= 0 ? `+${rowElo.delta}` : rowElo.delta} ELO
+                        </span>
+                      )}
+                      <span className="font-bold text-amber-300">{row.victoryPoints} PV</span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
             <button

@@ -105,6 +105,7 @@ export interface Nation {
   personality: AiPersonality;
   resources: ResourcePool;
   isEliminated: boolean;
+  capitalProvinceId?: string;
 }
 
 export interface DiplomaticOffer {
@@ -142,5 +143,6 @@ export interface GameState {
   pendingOffers: DiplomaticOffer[];
   telegrams: TelegramMessage[];
   tutorialStep: number; // 1 à 4 (0 = terminé/masqué)
+  eliminationOrder?: PlayableNationId[];
   winnerId: PlayableNationId | null;
 }

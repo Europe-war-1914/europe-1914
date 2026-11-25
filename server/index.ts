@@ -2,6 +2,7 @@ import http from 'node:http';
 import { Server } from 'socket.io';
 import { NATION_TEMPLATES, PLAYABLE_NATIONS } from '../src/data/nations';
 import { respondToDiplomaticOffer } from '../src/engine/ai';
+import { syncEliminatedAndFinalElo, type EloResult } from './elo';
 import { handleStripeRequest } from './stripe';
 import {
   orderArtilleryBombardment,
@@ -39,6 +40,9 @@ interface ServerRoom {
   autoStartTimer: ReturnType<typeof setInterval> | null;
   hostSocketId: string;
   players: Map<string, RoomPlayer>;
+  participants: Map<PlayableNationId, { userId?: string; name: string }>;
+  eloProcessedNations: Set<PlayableNationId>;
+  eloResults: Record<string, EloResult>;
   tokenToSocket: Map<string, string>;
   socketToToken: Map<string, string>;
   disconnectedSlots: Map<string, DisconnectedSlot>;
@@ -175,6 +179,9 @@ function launchRoomGame(room: ServerRoom): ActionResponse {
     room.autoStartTimer = null;
   }
   room.autoStartAt = null;
+  room.eloProcessedNations.clear();
+  room.eloResults = {};
+  room.participants.clear();
 
   const fresh = createNewGame(firstPlayer.nationId);
   fresh.tutorialStep = 0;
@@ -184,9 +191,14 @@ function launchRoomGame(room: ServerRoom): ActionResponse {
   }
   for (const p of room.players.values()) {
     fresh.nations[p.nationId].isPlayer = true;
+    room.participants.set(p.nationId, { userId: p.userId, name: p.name });
   }
   for (const d of room.disconnectedSlots.values()) {
     fresh.nations[d.player.nationId].isPlayer = true;
+    room.participants.set(d.player.nationId, {
+      userId: d.player.userId,
+      name: d.player.name,
+    });
   }
 
   room.state = fresh;
@@ -196,6 +208,28 @@ function launchRoomGame(room: ServerRoom): ActionResponse {
     if (!room.state) return;
     room.state = stepGameState(room.state, TICK_MS / 1000);
     broadcastGameState(room);
+
+    // Vérifie si un joueur vient d'être éliminé (capitale perdue) ou si la partie est finie
+    const hasPendingElo =
+      room.state.phase === 'ENDED' ||
+      Array.from(room.participants.keys()).some(
+        (nId) =>
+          !room.eloProcessedNations.has(nId) &&
+          Boolean(room.state?.nations[nId]?.isEliminated)
+      );
+
+    if (hasPendingElo) {
+      void syncEliminatedAndFinalElo(
+        room.state,
+        room.participants,
+        room.eloProcessedNations
+      ).then((newResults) => {
+        if (Object.keys(newResults).length > 0) {
+          Object.assign(room.eloResults, newResults);
+          io.to(room.code).emit('game:elo', room.eloResults);
+        }
+      });
+    }
 
     if (room.state.phase === 'ENDED' && room.interval) {
       clearInterval(room.interval);
@@ -227,9 +261,12 @@ function schedulePublicAutoStart(room: ServerRoom): void {
       return;
     }
 
-    // Si tous les 8 emplacements humains sont pris, on raccourcit à 3 s
     const totalHumans = room.players.size + room.disconnectedSlots.size;
-    if (totalHumans >= PLAYABLE_NATIONS.length && room.autoStartAt && room.autoStartAt - Date.now() > 3000) {
+    if (
+      totalHumans >= PLAYABLE_NATIONS.length &&
+      room.autoStartAt &&
+      room.autoStartAt - Date.now() > 3000
+    ) {
       room.autoStartAt = Date.now() + 3000;
     }
 
@@ -280,7 +317,6 @@ function removePlayerFromCurrentRoom(socketId: string, immediate = false): void 
     nextHost.isHost = true;
   }
 
-  // Si déconnexion involontaire en partie (ex. F5 / coupure 4G), période de grâce de 60 s
   if (!immediate && leaving && token && room.status === 'PLAYING') {
     const timer = setTimeout(() => {
       room.disconnectedSlots.delete(token);
@@ -394,6 +430,9 @@ io.on('connection', (socket) => {
         autoStartTimer: null,
         hostSocketId: socket.id,
         players: new Map(),
+        participants: new Map(),
+        eloProcessedNations: new Set(),
+        eloResults: {},
         tokenToSocket: new Map([[token, socket.id]]),
         socketToToken: new Map([[socket.id, token]]),
         disconnectedSlots: new Map(),
@@ -422,7 +461,6 @@ io.on('connection', (socket) => {
     }
   );
 
-  // --- MATCHMAKING PUBLIC (PARTIE RAPIDE) ---
   socket.on(
     'room:quickplay',
     (
@@ -439,7 +477,6 @@ io.on('connection', (socket) => {
       const cleanName = (payload?.playerName ?? '').trim().slice(0, 18) || 'Commandant';
       const token = (payload?.clientToken ?? '').trim() || socket.id;
 
-      // Cherche une salle publique ouverte
       let targetRoom: ServerRoom | null = null;
       for (const r of rooms.values()) {
         const occupied = r.players.size + r.disconnectedSlots.size;
@@ -460,6 +497,9 @@ io.on('connection', (socket) => {
           autoStartTimer: null,
           hostSocketId: socket.id,
           players: new Map(),
+          participants: new Map(),
+          eloProcessedNations: new Set(),
+          eloResults: {},
           tokenToSocket: new Map([[token, socket.id]]),
           socketToToken: new Map([[socket.id, token]]),
           disconnectedSlots: new Map(),
@@ -519,7 +559,6 @@ io.on('connection', (socket) => {
     }
   );
 
-  // --- RECONNEXION AUTOMATIQUE EN COURS DE PARTIE ---
   socket.on(
     'room:rejoin',
     (
@@ -579,6 +618,9 @@ io.on('connection', (socket) => {
             m.toNationId === restored.nationId
         )
       );
+      if (Object.keys(room.eloResults).length > 0) {
+        socket.emit('game:elo', room.eloResults);
+      }
       if (room.status === 'PLAYING' && room.state) {
         socket.emit('game:state', buildPlayerState(room.state, restored.nationId));
         broadcastGameState(room);
@@ -709,7 +751,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // --- CHAT DIPLOMATIQUE (PUBLIC & DÉPÊCHES PRIVÉES) ---
   socket.on(
     'chat:send',
     (

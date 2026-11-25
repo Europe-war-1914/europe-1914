@@ -6,6 +6,7 @@ import type {
   DiplomaticStatus,
   GameState,
   NationId,
+  PlayableNationId,
   Province,
   UnitStack,
   UnitType,
@@ -72,7 +73,6 @@ export function getTravelDurationSeconds(
   for (const type of UNIT_ORDER) {
     if (units[type] <= 0) continue;
     let base = UNIT_SPECS[type].travelSeconds;
-    // Sans pétrole, les chars et cuirassés perdent leur avantage de vitesse
     if (lowOil && UNIT_SPECS[type].usesOil) {
       base = Math.max(base, UNIT_SPECS.infantry.travelSeconds);
     }
@@ -81,14 +81,11 @@ export function getTravelDurationSeconds(
 
   if (slowest === 0) slowest = UNIT_SPECS.infantry.travelSeconds;
 
-  // Bonus des voies ferrées / port au départ (+30 % / niv.) et à l'arrivée (+15 % / niv. si allié)
   const destRailBonus =
     to && (to.owner === owner || getDiplomaticStatus(state, owner, to.owner) === 'alliance')
       ? to.buildings.railway * 0.15
       : 0;
   const railMultiplier = 1 / (1 + from.buildings.railway * 0.3 + destRailBonus);
-
-  // Traversée maritime légèrement plus longue sans escorte de cuirassé
   const navalMultiplier = isNaval ? (units.battleship > 0 ? 1.05 : 1.3) : 1.0;
 
   return Math.max(12, Math.round(slowest * railMultiplier * navalMultiplier));
@@ -101,6 +98,10 @@ export function orderMoveArmy(
   toId: string,
   requestedUnits: UnitStack
 ): { ok: boolean; reason?: string } {
+  if (state.nations[owner]?.isEliminated) {
+    return { ok: false, reason: 'Votre empire a été éliminé.' };
+  }
+
   const from = state.provinces[fromId];
   const to = state.provinces[toId];
   if (!from || !to || from.owner !== owner) {
@@ -141,7 +142,6 @@ export function orderMoveArmy(
     return { ok: false, reason: 'Aucune troupe sélectionnée.' };
   }
 
-  // Les cuirassés ne peuvent se déplacer que par liaison maritime
   const isNaval = !isLandNeighbor && isSeaNeighbor;
   if (!isNaval && send.battleship > 0) {
     send.battleship = 0;
@@ -150,7 +150,6 @@ export function orderMoveArmy(
     }
   }
 
-  // Consommation légère de pétrole au départ des blindés / navires
   const nation = state.nations[owner];
   if (nation) {
     const oilCost = send.tank * 3 + send.battleship * 5;
@@ -187,6 +186,9 @@ export function orderArtilleryBombardment(
   fromId: string,
   targetId: string
 ): { ok: boolean; reason?: string } {
+  if (state.nations[owner]?.isEliminated) {
+    return { ok: false, reason: 'Votre empire a été éliminé.' };
+  }
   if (state.phase === 'MOBILIZATION') {
     return { ok: false, reason: 'Bombardement interdit pendant la phase de mobilisation.' };
   }
@@ -312,7 +314,6 @@ function computeStackPower(
   }
 
   if (isDefender) {
-    // Fortification : +35 % de puissance défensive par niveau
     const fortBonus = 1 + province.buildings.fort * 0.35;
     const moraleBonus = 0.75 + (province.morale / 100) * 0.25;
     power *= terrain.defenseBonus * fortBonus * moraleBonus;
@@ -323,7 +324,6 @@ function computeStackPower(
 
 function applyDamageToStack(stack: UnitStack, damage: number): void {
   let remaining = damage;
-  // L'infanterie encaisse en premier, puis chars, puis artillerie/cuirassés
   for (const type of UNIT_ORDER) {
     if (remaining <= 0) break;
     const qty = stack[type];
@@ -340,14 +340,66 @@ function applyDamageToStack(stack: UnitStack, damage: number): void {
   }
 }
 
+/** Élimine officiellement une puissance après la chute de sa capitale */
+export function eliminateNation(
+  state: GameState,
+  loserId: PlayableNationId,
+  conquerorId?: NationId
+): void {
+  const nation = state.nations[loserId];
+  if (!nation || nation.isEliminated) return;
+
+  nation.isEliminated = true;
+  if (!state.eliminationOrder) {
+    state.eliminationOrder = [];
+  }
+  if (!state.eliminationOrder.includes(loserId)) {
+    state.eliminationOrder.push(loserId);
+  }
+
+  state.movingArmies = state.movingArmies.filter((a) => a.owner !== loserId);
+  state.constructions = state.constructions.filter((c) => c.owner !== loserId);
+  state.recruitments = state.recruitments.filter((r) => r.owner !== loserId);
+  state.battles = state.battles.filter((b) => b.attacker !== loserId);
+  state.pendingOffers = state.pendingOffers.filter(
+    (o) => o.from !== loserId && o.to !== loserId
+  );
+
+  for (const prov of Object.values(state.provinces)) {
+    if (prov.owner !== loserId) continue;
+    prov.owner = 'neutral';
+    prov.isCapital = false;
+    prov.morale = 50;
+    prov.garrison = {
+      infantry: Math.min(2, prov.garrison.infantry),
+      tank: 0,
+      artillery: 0,
+      battleship: 0,
+    };
+  }
+
+  const byText =
+    conquerorId && conquerorId !== 'neutral'
+      ? ` par ${NATION_TEMPLATES[conquerorId].shortName}`
+      : '';
+
+  pushTelegram(
+    state,
+    `Capitale tombée ! ${NATION_TEMPLATES[loserId].name} est éliminée${byText} !`,
+    'danger'
+  );
+}
+
 function captureProvince(state: GameState, prov: Province, conqueror: NationId, survivors: UnitStack): void {
   const previousOwner = prov.owner;
+  const wasCapital = prov.isCapital;
+
   prov.owner = conqueror;
+  prov.isCapital = false;
   prov.garrison = cloneStack(survivors);
   prov.morale = 55;
   prov.buildings.fort = Math.max(0, prov.buildings.fort - 1);
 
-  // Annule les chantiers en cours de l'ancien propriétaire dans cette région
   state.constructions = state.constructions.filter((c) => c.provinceId !== prov.id);
   state.recruitments = state.recruitments.filter((r) => r.provinceId !== prov.id);
 
@@ -361,10 +413,13 @@ function captureProvince(state: GameState, prov: Province, conqueror: NationId, 
       prov.id
     );
   }
+
+  if (wasCapital && previousOwner !== 'neutral') {
+    eliminateNation(state, previousOwner, conqueror);
+  }
 }
 
 export function tickMovementsAndCombat(state: GameState): void {
-  // 1. Résolution des armées arrivées à destination
   const stillMoving = [];
   for (const army of state.movingArmies) {
     if (state.elapsedSeconds < army.arrivalAt) {
@@ -381,16 +436,13 @@ export function tickMovementsAndCombat(state: GameState): void {
       continue;
     }
 
-    // Déclenche la guerre si attaque d'une autre grande puissance
     setDiplomaticStatus(state, army.owner, target.owner, 'war');
 
-    // Si aucun défenseur présent, capture immédiate
     if (totalStack(target.garrison) <= 0) {
       captureProvince(state, target, army.owner, army.units);
       continue;
     }
 
-    // Rejoint un combat en cours ou en ouvre un nouveau
     const existing = state.battles.find(
       (b) => b.provinceId === target.id && b.attacker === army.owner && !b.isBombardment
     );
@@ -422,13 +474,11 @@ export function tickMovementsAndCombat(state: GameState): void {
   }
   state.movingArmies = stillMoving;
 
-  // 2. Résolution des combats en cours (1 tick toutes les 3 secondes)
   const ongoingBattles: ActiveBattle[] = [];
   for (const battle of state.battles) {
     const prov = state.provinces[battle.provinceId];
     if (!prov) continue;
 
-    // Synchronise les défenseurs avec d'éventuels renforts arrivés dans la province
     battle.defenderUnits = prov.garrison;
 
     if (prov.owner === battle.attacker) continue;
@@ -440,7 +490,6 @@ export function tickMovementsAndCombat(state: GameState): void {
 
     battle.lastTickAt = state.elapsedSeconds;
 
-    // Casemates & tranchées réduisent de 15 % par niveau les pertes encaissées
     const fortProtection = Math.max(0.45, 1 - prov.buildings.fort * 0.15);
 
     if (battle.isBombardment) {
@@ -451,7 +500,6 @@ export function tickMovementsAndCombat(state: GameState): void {
         prov.buildings.fort -= 1;
       }
 
-      // Un pilonnage dure 15 s (5 salves) ou s'arrête si la garnison est rasée
       const elapsed = state.elapsedSeconds - battle.startedAt;
       if (totalStack(prov.garrison) > 0 && elapsed < 15) {
         ongoingBattles.push(battle);

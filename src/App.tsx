@@ -577,276 +577,278 @@ export default function App() {
   // --- ÉCRAN D'ACCUEIL : SOLO OU MULTIJOUEUR ---
   if (!state) {
     return (
-      <div className="flex min-h-dvh w-full flex-col items-center justify-start sm:justify-center bg-stone-950 p-3 pb-12 sm:p-4 text-amber-50 font-sans overflow-y-auto touch-pan-y">
-        <div className="w-full max-w-4xl rounded-xl border border-amber-200/30 bg-stone-900/95 p-4 sm:p-6 shadow-2xl">
-          {/* Barre de compte joueur (Supabase) + Classement + Boutique */}
-          {isSupabaseConfigured && (
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-stone-800 bg-stone-950/80 px-3 py-2 text-xs">
-              {profile ? (
-                <>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="flex items-center gap-1.5 font-semibold text-amber-100">
-                      <User className="h-3.5 w-3.5 text-amber-400" />
-                      {profile.username}
-                    </span>
-                    <span className="rounded border border-stone-700 bg-stone-900 px-2 py-0.5 font-mono text-[11px] text-amber-300">
-                      {profile.elo} ELO
-                    </span>
-                    {profile.is_commander && (
-                      <span className="flex items-center gap-1 rounded border border-amber-400/50 bg-amber-950/70 px-2 py-0.5 text-[11px] font-bold text-amber-300">
-                        <Crown className="h-3 w-3" />
-                        Commandant
+      <div className="h-dvh w-full overflow-y-auto overscroll-y-contain touch-pan-y bg-stone-950 p-3 pb-20 sm:p-4 text-amber-50 font-sans">
+        <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col justify-start sm:justify-center">
+          <div className="w-full rounded-xl border border-amber-200/30 bg-stone-900/95 p-4 sm:p-6 shadow-2xl">
+            {/* Barre de compte joueur (Supabase) + Classement + Boutique */}
+            {isSupabaseConfigured && (
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-stone-800 bg-stone-950/80 px-3 py-2 text-xs">
+                {profile ? (
+                  <>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="flex items-center gap-1.5 font-semibold text-amber-100">
+                        <User className="h-3.5 w-3.5 text-amber-400" />
+                        {profile.username}
                       </span>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setLeaderboardOpen(true)}
-                      className="flex items-center gap-1.5 rounded border border-stone-700 bg-stone-900 px-2.5 py-1 font-semibold text-amber-100 hover:bg-stone-800"
-                    >
-                      <Trophy className="h-3.5 w-3.5 text-amber-400" />
-                      Classement
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShopModalOpen(true)}
-                      className="flex items-center gap-1.5 rounded border border-amber-400/50 bg-amber-950/70 px-2.5 py-1 font-semibold text-amber-200 hover:bg-amber-900/70"
-                    >
-                      <Crown className="h-3.5 w-3.5 text-amber-400" />
-                      Boutique
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleLogout}
-                      className="flex items-center gap-1 rounded border border-stone-700 bg-stone-900 px-2.5 py-1 text-stone-300 hover:bg-stone-800 hover:text-white"
-                    >
-                      <LogOut className="h-3.5 w-3.5" />
-                      Déconnexion
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <span className="text-stone-400">
-                    Mode Invité — connectez-vous pour sauvegarder votre ELO et vos packs.
-                  </span>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setLeaderboardOpen(true)}
-                      className="flex items-center gap-1.5 rounded border border-stone-700 bg-stone-900 px-2.5 py-1 font-semibold text-amber-100 hover:bg-stone-800"
-                    >
-                      <Trophy className="h-3.5 w-3.5 text-amber-400" />
-                      Classement
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShopModalOpen(true)}
-                      className="flex items-center gap-1.5 rounded border border-amber-400/50 bg-amber-950/70 px-2.5 py-1 font-semibold text-amber-200 hover:bg-amber-900/70"
-                    >
-                      <Crown className="h-3.5 w-3.5 text-amber-400" />
-                      Boutique
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setAuthModalOpen(true)}
-                      className="flex items-center gap-1.5 rounded bg-amber-600 px-3 py-1 font-bold text-stone-950 hover:bg-amber-500"
-                    >
-                      <LogIn className="h-3.5 w-3.5" />
-                      Connexion / Inscription
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          <div className="text-center">
-            <p className="text-[11px] sm:text-xs font-semibold uppercase tracking-[0.2em] sm:tracking-[0.25em] text-amber-400">
-              Stratégie Compétitive • Sans Pay-to-Win
-            </p>
-            <h1 className="mt-1 font-serif text-2xl sm:text-4xl font-bold text-amber-100">
-              1914 : L’EUROPE EN FLAMMES
-            </h1>
-            <p className="mt-1 text-xs sm:text-sm text-stone-300">
-              Mode Blitz (30 min max • Mobilisation 2m30 • 65 régions)
-            </p>
-          </div>
-
-          {/* Sélecteur Solo / Multijoueur */}
-          <div className="mx-auto mt-3.5 sm:mt-5 grid max-w-md grid-cols-2 rounded-lg border border-stone-700 bg-stone-950 p-1 text-xs font-bold">
-            <button
-              type="button"
-              onClick={() => {
-                setLobbyTab('solo');
-                window.sessionStorage.removeItem(ACTIVE_ROOM_KEY);
-                setRoom(null);
-                setChatMessages([]);
-                soundEngine.playSelect();
-              }}
-              className={`rounded-md py-2 transition ${
-                lobbyTab === 'solo'
-                  ? 'bg-amber-600 text-stone-950'
-                  : 'text-stone-400 hover:text-amber-100'
-              }`}
-            >
-              Solo (vs 7 IA)
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setLobbyTab('online');
-                soundEngine.playSelect();
-              }}
-              className={`flex items-center justify-center gap-1.5 rounded-md py-2 transition ${
-                lobbyTab === 'online'
-                  ? 'bg-amber-600 text-stone-950'
-                  : 'text-stone-400 hover:text-amber-100'
-              }`}
-            >
-              <Users className="h-3.5 w-3.5" />
-              Multijoueur en ligne
-            </button>
-          </div>
-
-          {lobbyTab === 'solo' ? (
-            <>
-              <div className="mt-4 sm:mt-6 grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4 sm:gap-3">
-                {PLAYABLE_NATIONS.map((id) => {
-                  const tpl = NATION_TEMPLATES[id];
-                  const selected = chosenNation === id;
-                  return (
-                    <button
-                      type="button"
-                      key={id}
-                      onClick={() => {
-                        setChosenNation(id);
-                        soundEngine.playSelect();
-                      }}
-                      className={`flex flex-col rounded-lg border p-3 text-left transition ${
-                        selected
-                          ? 'border-amber-400 bg-stone-800 shadow-lg ring-1 ring-amber-400/60'
-                          : 'border-stone-700/80 bg-stone-950/70 hover:border-stone-500'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span
-                          className="h-3.5 w-3.5 rounded-full border border-white/50"
-                          style={{ backgroundColor: tpl.color }}
-                        />
-                        <span className="font-serif text-sm font-bold text-amber-100">
-                          {tpl.shortName}
+                      <span className="rounded border border-stone-700 bg-stone-900 px-2 py-0.5 font-mono text-[11px] text-amber-300">
+                        {profile.elo} ELO
+                      </span>
+                      {profile.is_commander && (
+                        <span className="flex items-center gap-1 rounded border border-amber-400/50 bg-amber-950/70 px-2 py-0.5 text-[11px] font-bold text-amber-300">
+                          <Crown className="h-3 w-3" />
+                          Commandant
                         </span>
-                      </div>
-                      <p className="mt-1.5 text-[11px] leading-relaxed text-stone-400">
-                        {tpl.lore}
-                      </p>
-                    </button>
-                  );
-                })}
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setLeaderboardOpen(true)}
+                        className="flex items-center gap-1.5 rounded border border-stone-700 bg-stone-900 px-2.5 py-1 font-semibold text-amber-100 hover:bg-stone-800"
+                      >
+                        <Trophy className="h-3.5 w-3.5 text-amber-400" />
+                        Classement
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShopModalOpen(true)}
+                        className="flex items-center gap-1.5 rounded border border-amber-400/50 bg-amber-950/70 px-2.5 py-1 font-semibold text-amber-200 hover:bg-amber-900/70"
+                      >
+                        <Crown className="h-3.5 w-3.5 text-amber-400" />
+                        Boutique
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleLogout}
+                        className="flex items-center gap-1 rounded border border-stone-700 bg-stone-900 px-2.5 py-1 text-stone-300 hover:bg-stone-800 hover:text-white"
+                      >
+                        <LogOut className="h-3.5 w-3.5" />
+                        Déconnexion
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-stone-400">
+                      Mode Invité — connectez-vous pour sauvegarder votre ELO et vos packs.
+                    </span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setLeaderboardOpen(true)}
+                        className="flex items-center gap-1.5 rounded border border-stone-700 bg-stone-900 px-2.5 py-1 font-semibold text-amber-100 hover:bg-stone-800"
+                      >
+                        <Trophy className="h-3.5 w-3.5 text-amber-400" />
+                        Classement
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShopModalOpen(true)}
+                        className="flex items-center gap-1.5 rounded border border-amber-400/50 bg-amber-950/70 px-2.5 py-1 font-semibold text-amber-200 hover:bg-amber-900/70"
+                      >
+                        <Crown className="h-3.5 w-3.5 text-amber-400" />
+                        Boutique
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAuthModalOpen(true)}
+                        className="flex items-center gap-1.5 rounded bg-amber-600 px-3 py-1 font-bold text-stone-950 hover:bg-amber-500"
+                      >
+                        <LogIn className="h-3.5 w-3.5" />
+                        Connexion / Inscription
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
+            )}
 
-              <div className="mt-5 sm:mt-6 flex justify-center">
-                <button
-                  type="button"
-                  onClick={() => startSoloMatch(chosenNation)}
-                  className="w-full sm:w-auto rounded-lg bg-amber-600 px-8 py-3 font-serif text-sm sm:text-base font-bold text-stone-950 shadow-lg transition hover:bg-amber-500"
-                >
-                  Prendre le commandement ({NATION_TEMPLATES[chosenNation].shortName})
-                </button>
-              </div>
-            </>
-          ) : (
-            <OnlineLobby
-              connected={connected}
-              serverUrl={SERVER_URL}
-              mySocketId={mySocketId}
-              defaultPlayerName={profile?.username}
-              room={room}
-              chatMessages={chatMessages}
-              error={onlineError}
-              onRetryConnection={() => {
-                setOnlineError(null);
-                setSocketNonce((n) => n + 1);
-              }}
-              onQuickPlay={handleQuickPlay}
-              onCreateRoom={(playerName, preferredNation) => {
-                setOnlineError(null);
-                setChatMessages([]);
-                socketRef.current?.emit(
-                  'room:create',
-                  {
-                    playerName: profile?.username ?? playerName,
-                    preferredNation,
-                    clientToken: getClientToken(),
-                    userId: profile?.id,
-                  },
-                  (res: { ok: boolean; room?: RoomSummary; reason?: string }) => {
-                    if (!res.ok) {
-                      setOnlineError(res.reason ?? 'Impossible de créer le salon.');
-                      soundEngine.playError();
-                    } else {
-                      if (res.room) {
-                        setRoom(res.room);
-                        window.sessionStorage.setItem(ACTIVE_ROOM_KEY, res.room.code);
+            <div className="text-center">
+              <p className="text-[11px] sm:text-xs font-semibold uppercase tracking-[0.2em] sm:tracking-[0.25em] text-amber-400">
+                Stratégie Compétitive • Sans Pay-to-Win
+              </p>
+              <h1 className="mt-1 font-serif text-2xl sm:text-4xl font-bold text-amber-100">
+                1914 : L’EUROPE EN FLAMMES
+              </h1>
+              <p className="mt-1 text-xs sm:text-sm text-stone-300">
+                Mode Blitz (30 min max • Mobilisation 2m30 • 65 régions)
+              </p>
+            </div>
+
+            {/* Sélecteur Solo / Multijoueur */}
+            <div className="mx-auto mt-3.5 sm:mt-5 grid max-w-md grid-cols-2 rounded-lg border border-stone-700 bg-stone-950 p-1 text-xs font-bold">
+              <button
+                type="button"
+                onClick={() => {
+                  setLobbyTab('solo');
+                  window.sessionStorage.removeItem(ACTIVE_ROOM_KEY);
+                  setRoom(null);
+                  setChatMessages([]);
+                  soundEngine.playSelect();
+                }}
+                className={`rounded-md py-2 transition ${
+                  lobbyTab === 'solo'
+                    ? 'bg-amber-600 text-stone-950'
+                    : 'text-stone-400 hover:text-amber-100'
+                }`}
+              >
+                Solo (vs 7 IA)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setLobbyTab('online');
+                  soundEngine.playSelect();
+                }}
+                className={`flex items-center justify-center gap-1.5 rounded-md py-2 transition ${
+                  lobbyTab === 'online'
+                    ? 'bg-amber-600 text-stone-950'
+                    : 'text-stone-400 hover:text-amber-100'
+                }`}
+              >
+                <Users className="h-3.5 w-3.5" />
+                Multijoueur en ligne
+              </button>
+            </div>
+
+            {lobbyTab === 'solo' ? (
+              <>
+                <div className="mt-4 sm:mt-6 grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4 sm:gap-3">
+                  {PLAYABLE_NATIONS.map((id) => {
+                    const tpl = NATION_TEMPLATES[id];
+                    const selected = chosenNation === id;
+                    return (
+                      <button
+                        type="button"
+                        key={id}
+                        onClick={() => {
+                          setChosenNation(id);
+                          soundEngine.playSelect();
+                        }}
+                        className={`flex flex-col rounded-lg border p-3 text-left transition ${
+                          selected
+                            ? 'border-amber-400 bg-stone-800 shadow-lg ring-1 ring-amber-400/60'
+                            : 'border-stone-700/80 bg-stone-950/70 hover:border-stone-500'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="h-3.5 w-3.5 rounded-full border border-white/50"
+                            style={{ backgroundColor: tpl.color }}
+                          />
+                          <span className="font-serif text-sm font-bold text-amber-100">
+                            {tpl.shortName}
+                          </span>
+                        </div>
+                        <p className="mt-1.5 text-[11px] leading-relaxed text-stone-400">
+                          {tpl.lore}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-5 sm:mt-6 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() => startSoloMatch(chosenNation)}
+                    className="w-full sm:w-auto rounded-lg bg-amber-600 px-8 py-3 font-serif text-sm sm:text-base font-bold text-stone-950 shadow-lg transition hover:bg-amber-500"
+                  >
+                    Prendre le commandement ({NATION_TEMPLATES[chosenNation].shortName})
+                  </button>
+                </div>
+              </>
+            ) : (
+              <OnlineLobby
+                connected={connected}
+                serverUrl={SERVER_URL}
+                mySocketId={mySocketId}
+                defaultPlayerName={profile?.username}
+                room={room}
+                chatMessages={chatMessages}
+                error={onlineError}
+                onRetryConnection={() => {
+                  setOnlineError(null);
+                  setSocketNonce((n) => n + 1);
+                }}
+                onQuickPlay={handleQuickPlay}
+                onCreateRoom={(playerName, preferredNation) => {
+                  setOnlineError(null);
+                  setChatMessages([]);
+                  socketRef.current?.emit(
+                    'room:create',
+                    {
+                      playerName: profile?.username ?? playerName,
+                      preferredNation,
+                      clientToken: getClientToken(),
+                      userId: profile?.id,
+                    },
+                    (res: { ok: boolean; room?: RoomSummary; reason?: string }) => {
+                      if (!res.ok) {
+                        setOnlineError(res.reason ?? 'Impossible de créer le salon.');
+                        soundEngine.playError();
+                      } else {
+                        if (res.room) {
+                          setRoom(res.room);
+                          window.sessionStorage.setItem(ACTIVE_ROOM_KEY, res.room.code);
+                        }
+                        soundEngine.playSelect();
                       }
-                      soundEngine.playSelect();
                     }
-                  }
-                );
-              }}
-              onJoinRoom={(code, playerName) => {
-                setOnlineError(null);
-                setChatMessages([]);
-                socketRef.current?.emit(
-                  'room:join',
-                  {
-                    code,
-                    playerName: profile?.username ?? playerName,
-                    clientToken: getClientToken(),
-                    userId: profile?.id,
-                  },
-                  (res: { ok: boolean; room?: RoomSummary; reason?: string }) => {
-                    if (!res.ok) {
-                      setOnlineError(res.reason ?? 'Impossible de rejoindre.');
-                      soundEngine.playError();
-                    } else {
-                      if (res.room) {
-                        setRoom(res.room);
-                        window.sessionStorage.setItem(ACTIVE_ROOM_KEY, res.room.code);
+                  );
+                }}
+                onJoinRoom={(code, playerName) => {
+                  setOnlineError(null);
+                  setChatMessages([]);
+                  socketRef.current?.emit(
+                    'room:join',
+                    {
+                      code,
+                      playerName: profile?.username ?? playerName,
+                      clientToken: getClientToken(),
+                      userId: profile?.id,
+                    },
+                    (res: { ok: boolean; room?: RoomSummary; reason?: string }) => {
+                      if (!res.ok) {
+                        setOnlineError(res.reason ?? 'Impossible de rejoindre.');
+                        soundEngine.playError();
+                      } else {
+                        if (res.room) {
+                          setRoom(res.room);
+                          window.sessionStorage.setItem(ACTIVE_ROOM_KEY, res.room.code);
+                        }
+                        soundEngine.playSelect();
                       }
-                      soundEngine.playSelect();
                     }
-                  }
-                );
-              }}
-              onSelectNation={(nationId) => {
-                setOnlineError(null);
-                socketRef.current?.emit(
-                  'room:selectNation',
-                  { nationId },
-                  (res: ActionResponse) => {
-                    if (!res.ok) setOnlineError(res.reason ?? 'Puissance indisponible.');
-                    else soundEngine.playSelect();
-                  }
-                );
-              }}
-              onSendChat={handleSendChat}
-              onStartRoom={() => {
-                setOnlineError(null);
-                socketRef.current?.emit('room:start', (res: ActionResponse) => {
-                  if (!res.ok) setOnlineError(res.reason ?? 'Erreur au lancement.');
-                });
-              }}
-              onLeaveRoom={() => {
-                socketRef.current?.emit('room:leave');
-                window.sessionStorage.removeItem(ACTIVE_ROOM_KEY);
-                setRoom(null);
-                setChatMessages([]);
-              }}
-            />
-          )}
+                  );
+                }}
+                onSelectNation={(nationId) => {
+                  setOnlineError(null);
+                  socketRef.current?.emit(
+                    'room:selectNation',
+                    { nationId },
+                    (res: ActionResponse) => {
+                      if (!res.ok) setOnlineError(res.reason ?? 'Puissance indisponible.');
+                      else soundEngine.playSelect();
+                    }
+                  );
+                }}
+                onSendChat={handleSendChat}
+                onStartRoom={() => {
+                  setOnlineError(null);
+                  socketRef.current?.emit('room:start', (res: ActionResponse) => {
+                    if (!res.ok) setOnlineError(res.reason ?? 'Erreur au lancement.');
+                  });
+                }}
+                onLeaveRoom={() => {
+                  socketRef.current?.emit('room:leave');
+                  window.sessionStorage.removeItem(ACTIVE_ROOM_KEY);
+                  setRoom(null);
+                  setChatMessages([]);
+                }}
+              />
+            )}
+          </div>
         </div>
 
         {toast && (

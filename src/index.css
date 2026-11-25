@@ -5,6 +5,11 @@ html, body, #root {
   margin: 0;
   padding: 0;
   overflow: hidden;
-  background-color: #1c1917;
+  background-color: #0c0a09;
   user-select: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+input, textarea, select {
+  user-select: text;
 }

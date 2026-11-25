@@ -3,7 +3,7 @@ import { NATION_TEMPLATES } from '../data/nations';
 import { getMovingArmyWorldPos, totalStack } from '../engine/combat';
 import { getDiplomaticStatus } from '../engine/diplomacy';
 import { hasIntelOnProvince, isMovingArmyVisibleTo } from '../engine/visibility';
-import type { GameState, MovingArmy, Province } from '../engine/types';
+import type { DefenseType, GameState, MovingArmy, Province } from '../engine/types';
 import { drawFogUnknownToken, drawUnitToken } from './drawUnits';
 
 export interface Camera {
@@ -67,7 +67,7 @@ export function hitTestMovingArmy(
   for (const army of state.movingArmies) {
     if (army.owner !== state.playerNationId) continue;
     const [ax, ay] = getMovingArmyWorldPos(state, army);
-    if (Math.hypot(wx - ax, wy - ay) <= 24) {
+    if (Math.hypot(wx - ax, wy - ay) <= 26) {
       return army;
     }
   }
@@ -86,8 +86,8 @@ function getDiplomaticFillColor(state: GameState, prov: Province): string {
 
 function drawMountainRelief(ctx: CanvasRenderingContext2D, cx: number, cy: number) {
   ctx.save();
-  ctx.strokeStyle = 'rgba(28, 24, 19, 0.34)';
-  ctx.fillStyle = 'rgba(28, 24, 19, 0.14)';
+  ctx.strokeStyle = 'rgba(28, 24, 19, 0.36)';
+  ctx.fillStyle = 'rgba(28, 24, 19, 0.16)';
   ctx.lineWidth = 1;
 
   const peaks = [
@@ -107,159 +107,219 @@ function drawMountainRelief(ctx: CanvasRenderingContext2D, cx: number, cy: numbe
   ctx.restore();
 }
 
+/** Structures défensives détaillées posées directement sur le terrain de la province */
 function drawProvinceDefensesVisuals(
   ctx: CanvasRenderingContext2D,
   prov: Province,
   nowSec: number
 ) {
   const [cx, cy] = prov.center;
-  const isWeak = (def: 'trenches' | 'bunkers' | 'aa_defense' | 'naval_defense') =>
+  const isWeak = (def: DefenseType) =>
     prov.activeWeaknesses.some((w) => w.defense === def && w.expiresAt > nowSec);
 
   ctx.save();
 
-  // 1. TRANCHÉES (haut-gauche)
+  // 1. TRANCHÉES : tranchée creusée en zigzag, talus de terre et chevaux de frise (niv. 2–3)
   if (prov.defenses.trenches > 0) {
     const lvl = prov.defenses.trenches;
     const weak = isWeak('trenches');
-    const tx = cx - 26;
-    const ty = cy - 13;
+    const tx = cx - 32;
+    const ty = cy - 9;
 
-    ctx.strokeStyle = weak ? 'rgba(220, 38, 38, 0.85)' : 'rgba(92, 74, 52, 0.92)';
-    ctx.lineWidth = 3.6;
-    ctx.lineCap = 'square';
+    // Ombre portée
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
     ctx.beginPath();
-    ctx.moveTo(tx - 8, ty + 4);
-    ctx.lineTo(tx - 4, ty - 2);
-    ctx.lineTo(tx, ty + 4);
-    ctx.lineTo(tx + 4, ty - 2);
-    ctx.lineTo(tx + 8, ty + 4);
+    ctx.roundRect(tx - 10, ty - 4, 20, 10, 3);
+    ctx.fill();
+
+    // Talus de terre / parapet
+    ctx.strokeStyle = weak ? '#dc2626' : '#6b5338';
+    ctx.lineWidth = 4.6;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'miter';
+    ctx.beginPath();
+    ctx.moveTo(tx - 9, ty + 3);
+    ctx.lineTo(tx - 4.5, ty - 3);
+    ctx.lineTo(tx, ty + 3);
+    ctx.lineTo(tx + 4.5, ty - 3);
+    ctx.lineTo(tx + 9, ty + 3);
     ctx.stroke();
 
-    ctx.strokeStyle = '#181512';
-    ctx.lineWidth = 1.6;
+    // Sillon profond de la tranchée
+    ctx.strokeStyle = '#14110e';
+    ctx.lineWidth = 1.8;
     ctx.stroke();
 
+    // Barbelés métalliques (niv. 2 et 3)
     if (lvl >= 2) {
-      ctx.strokeStyle = weak ? '#fca5a5' : '#b8b0a0';
-      ctx.lineWidth = 0.85;
-      for (let i = -1; i <= (lvl === 3 ? 1 : 0); i++) {
-        const bx = tx + i * 6;
-        const by = ty - 5;
+      ctx.strokeStyle = weak ? '#fca5a5' : '#c4bdb0';
+      ctx.lineWidth = 0.9;
+      const posts = lvl >= 3 ? [-6, 0, 6] : [-4, 4];
+      for (const px of posts) {
         ctx.beginPath();
-        ctx.moveTo(bx - 2, by - 2);
-        ctx.lineTo(bx + 2, by + 2);
-        ctx.moveTo(bx + 2, by - 2);
-        ctx.lineTo(bx - 2, by + 2);
+        ctx.moveTo(tx + px - 2.2, ty - 5.5);
+        ctx.lineTo(tx + px + 2.2, ty - 2.2);
+        ctx.moveTo(tx + px + 2.2, ty - 5.5);
+        ctx.lineTo(tx + px - 2.2, ty - 2.2);
         ctx.stroke();
       }
     }
   }
 
-  // 2. BUNKERS (droite)
+  // 2. BUNKERS : casemate en béton armé, meurtrière, coupole blindée et sac de sable
   if (prov.defenses.bunkers > 0) {
     const lvl = prov.defenses.bunkers;
     const weak = isWeak('bunkers');
-    const bx = cx + 27;
-    const by = cy - 2;
+    const bx = cx + 32;
+    const by = cy + 6;
 
-    ctx.fillStyle = weak ? '#7f1d1d' : '#78756e';
-    ctx.strokeStyle = weak ? '#f87171' : '#1c1a17';
-    ctx.lineWidth = 1.1;
+    // Ombre au sol
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.42)';
     ctx.beginPath();
-    ctx.moveTo(bx - 8, by + 4);
-    ctx.lineTo(bx - 6, by - 4);
-    ctx.lineTo(bx + 6, by - 4);
-    ctx.lineTo(bx + 8, by + 4);
+    ctx.roundRect(bx - 9, by - 3, 19, 10, 2.5);
+    ctx.fill();
+
+    // Bloc de béton armé dégradé
+    const concGrad = ctx.createLinearGradient(bx, by - 6, bx, by + 5);
+    concGrad.addColorStop(0, weak ? '#991b1b' : '#8a867e');
+    concGrad.addColorStop(1, weak ? '#450a0a' : '#4a4742');
+    ctx.fillStyle = concGrad;
+    ctx.strokeStyle = weak ? '#f87171' : '#171513';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(bx - 9.5, by + 5);
+    ctx.lineTo(bx - 7.2, by - 5.5);
+    ctx.lineTo(bx + 7.2, by - 5.5);
+    ctx.lineTo(bx + 9.5, by + 5);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
 
-    ctx.fillStyle = '#0f0e0d';
-    ctx.fillRect(bx - 4.5, by - 1.5, 9, 2.2);
+    // Fente de tir / meurtrière sombre
+    ctx.fillStyle = '#0c0b0a';
+    ctx.fillRect(bx - 5.2, by - 1.8, 10.4, 2.4);
 
+    // Tourelle / coupole blindée (niv. 2+)
     if (lvl >= 2) {
-      ctx.fillStyle = '#52525b';
+      ctx.fillStyle = '#575652';
       ctx.beginPath();
-      ctx.arc(bx, by - 4.2, 3.2, Math.PI, 0);
+      ctx.arc(bx, by - 5.5, 3.8, Math.PI, 0);
       ctx.fill();
       ctx.stroke();
     }
+
+    // Bande dorée / renfort lourd (niv. 3)
     if (lvl >= 3) {
       ctx.fillStyle = '#d4af37';
-      ctx.fillRect(bx - 6, by + 5.2, 12, 1.5);
+      ctx.fillRect(bx - 7, by + 5.8, 14, 1.6);
     }
   }
 
-  // 3. DÉFENSES AÉRIENNES / DCA (haut-droite)
+  // 3. DÉFENSES AÉRIENNES (DCA) : batterie en sacs de sable + canons antiaériens
   if (prov.defenses.aa_defense > 0) {
     const lvl = prov.defenses.aa_defense;
     const weak = isWeak('aa_defense');
-    const ax = cx + 25;
-    const ay = cy - 17;
+    const ax = cx + 31;
+    const ay = cy - 12;
 
-    ctx.fillStyle = weak ? '#7f1d1d' : '#6b6250';
-    ctx.strokeStyle = weak ? '#f87171' : '#181614';
-    ctx.lineWidth = 1.1;
+    // Ombre au sol
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
     ctx.beginPath();
-    ctx.arc(ax, ay, 5.5, 0, Math.PI * 2);
+    ctx.ellipse(ax + 1.5, ay + 2, 7.5, 5.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Parapet circulaire en sacs de sable
+    ctx.fillStyle = weak ? '#7f1d1d' : '#756952';
+    ctx.strokeStyle = weak ? '#f87171' : '#181512';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.arc(ax, ay, 6.8, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
 
-    ctx.strokeStyle = '#e5e7eb';
-    ctx.lineWidth = 1.5;
+    // Affût central & tubes de DCA pointés vers le ciel
+    ctx.fillStyle = '#27272a';
     ctx.beginPath();
-    ctx.moveTo(ax - 1, ay + 1);
-    ctx.lineTo(ax + 6, ay - 6.5);
+    ctx.arc(ax, ay, 3.1, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = '#e2e8f0';
+    ctx.lineWidth = 1.65;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(ax - 1.2, ay + 1.2);
+    ctx.lineTo(ax + 7.2, ay - 7.8);
     if (lvl >= 2) {
-      ctx.moveTo(ax + 1.5, ay + 1.5);
-      ctx.lineTo(ax + 8, ay - 4.5);
+      ctx.moveTo(ax + 1.4, ay + 1.6);
+      ctx.lineTo(ax + 9.2, ay - 5.4);
     }
     ctx.stroke();
 
+    // Secteur de tir / veille antiaérienne au niveau 3
     if (lvl >= 3) {
-      ctx.strokeStyle = weak ? 'rgba(248, 113, 113, 0.7)' : 'rgba(186, 230, 253, 0.65)';
-      ctx.lineWidth = 0.9;
-      ctx.setLineDash([2, 2]);
+      ctx.strokeStyle = weak ? 'rgba(248, 113, 113, 0.75)' : 'rgba(186, 230, 253, 0.65)';
+      ctx.lineWidth = 1.0;
+      ctx.setLineDash([2.5, 2.5]);
       ctx.beginPath();
-      ctx.arc(ax, ay, 9, -Math.PI * 0.85, 0.1);
+      ctx.arc(ax, ay, 11, -Math.PI * 0.85, 0.15);
       ctx.stroke();
       ctx.setLineDash([]);
     }
   }
 
-  // 4. DÉFENSES MARINES (bas-gauche)
+  // 4. DÉFENSES MARINES : batterie côtière blindée + mines / bouées navales
   if (prov.defenses.naval_defense > 0) {
     const lvl = prov.defenses.naval_defense;
     const weak = isWeak('naval_defense');
-    const nx = cx - 26;
-    const ny = cy + 6;
+    const nx = cx - 32;
+    const ny = cy + 8;
 
-    ctx.fillStyle = weak ? '#7f1d1d' : '#3d4f5f';
-    ctx.strokeStyle = weak ? '#f87171' : '#0f172a';
-    ctx.lineWidth = 1.1;
+    // Ombre au sol
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.42)';
     ctx.beginPath();
-    ctx.roundRect(nx - 6.5, ny - 3.5, 13, 7, 2);
+    ctx.roundRect(nx - 8, ny - 3, 17, 9, 2.5);
+    ctx.fill();
+
+    // Casemate côtière en acier/béton
+    const navGrad = ctx.createLinearGradient(nx, ny - 5, nx, ny + 5);
+    navGrad.addColorStop(0, weak ? '#991b1b' : '#4a6073');
+    navGrad.addColorStop(1, weak ? '#450a0a' : '#1e2b36');
+    ctx.fillStyle = navGrad;
+    ctx.strokeStyle = weak ? '#f87171' : '#0f172a';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.roundRect(nx - 8, ny - 4.5, 16, 8.5, 2.2);
     ctx.fill();
     ctx.stroke();
 
+    // Pièces d'artillerie côtière orientées vers la mer
     ctx.strokeStyle = '#cbd5e1';
-    ctx.lineWidth = 1.4;
+    ctx.lineWidth = 1.6;
+    ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.moveTo(nx - 4, ny - 0.8);
-    ctx.lineTo(nx - 11.5, ny - 2.2);
+    ctx.moveTo(nx - 4.5, ny - 1.2);
+    ctx.lineTo(nx - 13.5, ny - 2.8);
     if (lvl >= 2) {
-      ctx.moveTo(nx - 4, ny + 1.4);
-      ctx.lineTo(nx - 11.5, ny + 0.8);
+      ctx.moveTo(nx - 4.5, ny + 1.6);
+      ctx.lineTo(nx - 13.5, ny + 1.0);
     }
     ctx.stroke();
 
+    // Mines / bouées marines en mer (niv. 2 et 3)
     if (lvl >= 2) {
       ctx.fillStyle = weak ? '#fca5a5' : '#38bdf8';
+      ctx.strokeStyle = '#0f172a';
+      ctx.lineWidth = 0.8;
       ctx.beginPath();
-      ctx.arc(nx - 9, ny + 5.5, 1.5, 0, Math.PI * 2);
-      if (lvl >= 3) ctx.arc(nx - 3, ny + 6.5, 1.5, 0, Math.PI * 2);
+      ctx.arc(nx - 11.5, ny + 6.5, 2.0, 0, Math.PI * 2);
       ctx.fill();
+      ctx.stroke();
+      if (lvl >= 3) {
+        ctx.beginPath();
+        ctx.arc(nx - 4.5, ny + 7.5, 2.0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
     }
   }
 
@@ -315,7 +375,7 @@ function drawProvinceStructures(
 
   if (badges.length > 0) {
     const startX = cx - ((badges.length - 1) * 32) / 2;
-    const by = cy + 33;
+    const by = cy + 36;
     ctx.font = 'bold 7.5px ui-monospace, SFMono-Regular, monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -351,7 +411,7 @@ function drawBattleEffect(
   for (let i = 0; i < 3; i++) {
     const phase = (timeSec * 0.7 + i * 0.33) % 1;
     const sx = cx + (i - 1) * 10 + Math.sin(timeSec + i) * 3;
-    const sy = cy - 12 - phase * 18;
+    const sy = cy - 16 - phase * 18;
     ctx.fillStyle = `rgba(24, 22, 20, ${(1 - phase) * 0.42})`;
     ctx.beginPath();
     ctx.arc(sx, sy, 4 + phase * 6, 0, Math.PI * 2);
@@ -362,13 +422,13 @@ function drawBattleEffect(
   ctx.strokeStyle = `rgba(185, 28, 28, ${(1 - pulse) * 0.75})`;
   ctx.lineWidth = 1.6;
   ctx.beginPath();
-  ctx.arc(cx, cy, 14 + pulse * 18, 0, Math.PI * 2);
+  ctx.arc(cx, cy, 18 + pulse * 18, 0, Math.PI * 2);
   ctx.stroke();
 
   if (Math.sin(timeSec * 14 + cx) > 0.72) {
     ctx.fillStyle = 'rgba(251, 191, 36, 0.85)';
     ctx.beginPath();
-    ctx.arc(cx + 8, cy - 6, 3.2, 0, Math.PI * 2);
+    ctx.arc(cx + 10, cy - 8, 3.2, 0, Math.PI * 2);
     ctx.fill();
   }
 
@@ -377,7 +437,7 @@ function drawBattleEffect(
   ctx.strokeStyle = '#fca5a5';
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.roundRect(cx - 32, cy - 35, 64, 14, 2.5);
+  ctx.roundRect(cx - 32, cy - 40, 64, 14, 2.5);
   ctx.fill();
   ctx.stroke();
 
@@ -385,7 +445,7 @@ function drawBattleEffect(
   ctx.font = 'bold 8.5px ui-monospace, monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(txt, cx, cy - 27.8);
+  ctx.fillText(txt, cx, cy - 32.8);
 
   ctx.restore();
 }
@@ -551,7 +611,10 @@ export function drawMap(
   }
   ctx.restore();
 
-  if (movePreview && (movePreview.route.length >= 2 || (movePreview.startPos && movePreview.route.length >= 1))) {
+  if (
+    movePreview &&
+    (movePreview.route.length >= 2 || (movePreview.startPos && movePreview.route.length >= 1))
+  ) {
     ctx.save();
     ctx.strokeStyle = movePreview.isSubmarineMission
       ? '#38bdf8'
@@ -584,7 +647,7 @@ export function drawMap(
     if (dest) {
       ctx.setLineDash([]);
       ctx.beginPath();
-      ctx.arc(dest.center[0], dest.center[1], 16, 0, Math.PI * 2);
+      ctx.arc(dest.center[0], dest.center[1], 18, 0, Math.PI * 2);
       ctx.stroke();
     }
     ctx.restore();
@@ -601,9 +664,9 @@ export function drawMap(
       ctx.textBaseline = 'middle';
       const label = prov.isCapital ? `★ ${prov.name}` : prov.name;
       ctx.fillStyle = 'rgba(12, 10, 8, 0.85)';
-      ctx.fillText(label, cx + 0.9, cy + 22.9);
+      ctx.fillText(label, cx + 0.9, cy + 25.9);
       ctx.fillStyle = prov.isCapital ? '#f3d57a' : '#e6dfd0';
-      ctx.fillText(label, cx, cy + 22);
+      ctx.fillText(label, cx, cy + 25);
       ctx.restore();
     }
 

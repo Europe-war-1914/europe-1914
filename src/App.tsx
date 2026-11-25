@@ -75,8 +75,13 @@ export default function App() {
   const [muted, setMuted] = useState<boolean>(() => soundEngine.isMuted());
 
   // Compte joueur Supabase & Boutique / Thèmes
-  const [authUser, setAuthUser] = useState<{ id: string; username: string } | null>(null);
+  const [authUser, setAuthUser] = useState<{
+    id: string;
+    username: string;
+    email?: string;
+  } | null>(null);
   const [profile, setProfile] = useState<PlayerProfile | null>(null);
+  const [profileNonce, setProfileNonce] = useState(0);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [shopModalOpen, setShopModalOpen] = useState(false);
   const [mapTheme, setMapTheme] = useState<MapThemeId>(() => {
@@ -101,6 +106,26 @@ export default function App() {
   const isSoloActive = state !== null && !isOnlineMatch;
   const shouldConnectSocket = lobbyTab === 'online' || isOnlineMatch;
 
+  // Détection du retour après paiement Stripe (?payment=success / cancelled)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const payment = params.get('payment');
+    if (!payment) return;
+
+    if (payment === 'success') {
+      setToast('🎉 Paiement réussi ! Activation de votre Pack Commandant...');
+      setProfileNonce((n) => n + 1);
+      const t = window.setTimeout(() => setProfileNonce((n) => n + 1), 2500);
+      window.history.replaceState({}, '', window.location.pathname);
+      return () => window.clearTimeout(t);
+    }
+
+    if (payment === 'cancelled') {
+      setToast('Paiement annulé.');
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
+
   // 1. Suivi de la session Supabase
   useEffect(() => {
     if (!supabase) return;
@@ -118,7 +143,7 @@ export default function App() {
         (typeof user.user_metadata?.username === 'string' && user.user_metadata.username) ||
         user.email?.split('@')[0] ||
         'Commandant';
-      setAuthUser({ id: user.id, username: fallbackName });
+      setAuthUser({ id: user.id, username: fallbackName, email: user.email });
     };
 
     void client.auth.getSession().then(({ data }) => {
@@ -173,7 +198,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [authUser]);
+  }, [authUser, profileNonce]);
 
   const handleLogout = async () => {
     if (!supabase) return;
@@ -181,6 +206,38 @@ export default function App() {
     setAuthUser(null);
     setProfile(null);
     soundEngine.playSelect();
+  };
+
+  const handleBuyCommander = async () => {
+    if (!authUser) {
+      setShopModalOpen(false);
+      setAuthModalOpen(true);
+      return;
+    }
+
+    setToast('Connexion au paiement sécurisé Stripe...');
+    try {
+      const response = await fetch(`${SERVER_URL}/api/create-checkout-session`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: authUser.id,
+          email: authUser.email,
+        }),
+      });
+
+      const data = (await response.json()) as { url?: string; error?: string };
+      if (!response.ok || !data.url) {
+        setToast(data.error ?? 'Impossible de démarrer le paiement Stripe.');
+        soundEngine.playError();
+        return;
+      }
+
+      window.location.href = data.url;
+    } catch {
+      setToast('Le serveur est en cours de réveil, réessayez dans quelques secondes.');
+      soundEngine.playError();
+    }
   };
 
   // Boucle de simulation locale UNIQUEMENT en mode Solo
@@ -259,7 +316,7 @@ export default function App() {
   // Effacement automatique des alertes d'action
   useEffect(() => {
     if (!toast) return;
-    const t = window.setTimeout(() => setToast(null), 3200);
+    const t = window.setTimeout(() => setToast(null), 4000);
     return () => window.clearTimeout(t);
   }, [toast]);
 
@@ -677,9 +734,7 @@ export default function App() {
               soundEngine.playSelect();
             }}
             onOpenAuth={() => setAuthModalOpen(true)}
-            onBuyCommander={() => {
-              setToast('Paiement Stripe en cours d’activation — bientôt disponible !');
-            }}
+            onBuyCommander={() => void handleBuyCommander()}
             onClose={() => setShopModalOpen(false)}
           />
         )}

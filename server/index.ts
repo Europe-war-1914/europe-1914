@@ -2,6 +2,7 @@ import http from 'node:http';
 import { Server } from 'socket.io';
 import { NATION_TEMPLATES, PLAYABLE_NATIONS } from '../src/data/nations';
 import { respondToDiplomaticOffer } from '../src/engine/ai';
+import { handleStripeRequest } from './stripe';
 import {
   orderArtilleryBombardment,
   orderMoveArmy,
@@ -38,9 +39,20 @@ const PORT = Number(process.env.PORT ?? 3001);
 const TICK_MS = 250;
 const MAX_CHAT_HISTORY = 100;
 
-const httpServer = http.createServer((_req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-  res.end('1914 : Serveur Multijoueur actif');
+const httpServer = http.createServer((req, res) => {
+  void handleStripeRequest(req, res)
+    .then((handled) => {
+      if (handled) return;
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('1914 : Serveur Multijoueur actif');
+    })
+    .catch((err) => {
+      console.error('[Stripe] Erreur inattendue :', err);
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Erreur interne du serveur.' }));
+      }
+    });
 });
 
 const io = new Server(httpServer, {

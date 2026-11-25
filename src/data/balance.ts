@@ -29,22 +29,21 @@ export const GAME_MODES: Record<GameMode, GameModeSpec> = {
     id: 'campaign',
     label: 'Grande Guerre',
     durationLabel: '30–60 min • Dernier survivant',
-    description:
-      'Même victoire par élimination totale, avec rythme stratégique complet.',
+    description: 'Même victoire par élimination totale, avec rythme stratégique complet.',
   },
 };
 
 export const GAME_CONFIG = {
   combatTickSeconds: 3,
-  defenseWeaknessDurationSeconds: 120, // Affaiblissement temporaire de 2 minutes
-  submarineLandingSeconds: 10, // Débarquement de 10 s avec alerte au défenseur
-  capitalCaptureTechBonus: 120, // Points Technologiques gagnés en prenant une capitale
-  capitalCaptureTechStealRatio: 0.3, // +30 % du stock PT de la nation éliminée
-  allianceCostGold: 250, // Coût fixe en or pour former une alliance
-  betrayalCostGold: 350, // Coût fixe en or pour trahir / rompre une alliance
+  defenseWeaknessDurationSeconds: 120,
+  submarineLandingSeconds: 10,
+  capitalCaptureTechBonus: 120,
+  capitalCaptureTechStealRatio: 0.3,
+  allianceCostGold: 250,
+  betrayalCostGold: 350,
   aiDiplomacyMinThinkSeconds: 8,
   aiDiplomacyMaxThinkSeconds: 15,
-  neutralGrowthIntervalSeconds: 95, // Montée en puissance progressive des neutres
+  neutralGrowthIntervalSeconds: 95,
   startingResources: {
     gold: 950,
     steel: 450,
@@ -56,7 +55,6 @@ export const GAME_CONFIG = {
   startingGarrisonNeutral: { soldier: 4, scout: 1 },
 };
 
-// Points Technologiques générés par minute selon le niveau du laboratoire unique (capitale)
 export const LAB_TP_PER_MINUTE: Record<number, number> = {
   0: 0,
   1: 4,
@@ -64,7 +62,6 @@ export const LAB_TP_PER_MINUTE: Record<number, number> = {
   3: 12,
 };
 
-// Contres défensifs : niv. 1 = -50 %, niv. 2 = -75 %, niv. 3 = -100 % avec minimum symbolique (5 % d'efficacité)
 export const DEFENSE_COUNTER_REDUCTION: Record<number, number> = {
   0: 0,
   1: 0.5,
@@ -115,7 +112,8 @@ export const UNIT_SPECS: Record<UnitType, UnitSpec> = {
     category: 'infantry',
     armyTechAxis: 'infantry',
     counteredBy: 'bunkers',
-    description: 'Infanterie rapide idéale pour la reconnaissance et les prises éclairs. Faible face aux bunkers.',
+    description:
+      'Infanterie rapide idéale pour la reconnaissance et les prises éclairs. Faible face aux bunkers.',
     cost: { gold: 55, steel: 15, gas: 10 },
     trainSeconds: 10,
     attack: 8,
@@ -175,7 +173,8 @@ export const UNIT_SPECS: Record<UnitType, UnitSpec> = {
     category: 'aviation',
     armyTechAxis: 'aviation',
     counteredBy: 'aa_defense',
-    description: 'Spécialisé dans les combats aériens et l’interception des bombardiers. Contré par la DCA.',
+    description:
+      'Spécialisé dans les combats aériens et l’interception des bombardiers. Contré par la DCA.',
     cost: { gold: 175, steel: 80, gas: 45 },
     trainSeconds: 22,
     attack: 20,
@@ -249,7 +248,6 @@ export interface TechAxisSpec {
 }
 
 export const TECH_AXES_SPECS: Record<TechAxis, TechAxisSpec> = {
-  // Branche Défense
   trenches: {
     id: 'trenches',
     branch: 'defense',
@@ -272,34 +270,37 @@ export const TECH_AXES_SPECS: Record<TechAxis, TechAxisSpec> = {
     id: 'naval_defense',
     branch: 'defense',
     label: 'Défenses marines',
-    description: 'Débloque les Défenses marines niv. 1 à 3 (détectent sous-marins, contrent la Marine).',
+    description:
+      'Débloque les Défenses marines niv. 1 à 3 (détectent sous-marins, contrent la Marine).',
   },
-  // Branche Armée
   tanks: {
     id: 'tanks',
     branch: 'army',
     label: 'Blindés (Tanks)',
-    description: '+20 % attaque/défense par niveau pour Blindés légers et lourds (inefficaces vs Tranchées).',
+    description:
+      'Débloque (niv. 1) et renforce (+20 %/niv.) Blindés légers et lourds (inefficaces vs Tranchées).',
   },
   aviation: {
     id: 'aviation',
     branch: 'army',
     label: 'Aviation',
-    description: '+20 % efficacité par niveau pour Bombardiers et Chasseurs (inefficaces vs DCA).',
+    description:
+      'Débloque (niv. 1) et renforce (+20 %/niv.) Bombardiers et Chasseurs (inefficaces vs DCA).',
   },
   infantry: {
     id: 'infantry',
     branch: 'army',
     label: 'Infanterie',
-    description: '+20 % efficacité par niveau pour Éclaireurs et Soldats (faibles vs Bunkers).',
+    description:
+      'Débloque (niv. 1) et renforce (+20 %/niv.) Éclaireurs et Soldats (faibles vs Bunkers).',
   },
   naval: {
     id: 'naval',
     branch: 'army',
     label: 'Armée navale',
-    description: '+20 % efficacité par niveau pour Sous-marins et Frégates (faibles vs Défenses marines).',
+    description:
+      'Débloque (niv. 1) et renforce (+20 %/niv.) Sous-marins et Frégates (faibles vs Défenses marines).',
   },
-  // Branche Ressources
   gas_extraction: {
     id: 'gas_extraction',
     branch: 'resources',
@@ -387,7 +388,6 @@ export function createInitialTechLevels(): Record<TechAxis, number> {
   };
 }
 
-// Caserne : peu coûteuse (améliore uniquement la vitesse de formation)
 export function getBarracksCost(currentLevel: number): { cost: ResourcePool; buildSeconds: number } {
   const mult = 1 + (currentLevel - 1) * 0.55;
   return {
@@ -400,23 +400,23 @@ export function getBarracksCost(currentLevel: number): { cost: ResourcePool; bui
   };
 }
 
-// Laboratoire unique (capitale) : niv. 1 -> 2 -> 3
+// Laboratoire unique (capitale) : investissement stratégique rare et coûteux (niv. 1 -> 2 -> 3)
 export function getLaboratoryCost(currentLevel: number): {
   cost: ResourcePool;
   buildSeconds: number;
 } {
-  const mult = currentLevel === 1 ? 1 : 1.75;
+  if (currentLevel <= 1) {
+    return {
+      cost: { gold: 950, steel: 500, gas: 300 },
+      buildSeconds: 55,
+    };
+  }
   return {
-    cost: {
-      gold: Math.round(240 * mult),
-      steel: Math.round(130 * mult),
-      gas: Math.round(70 * mult),
-    },
-    buildSeconds: 32,
+    cost: { gold: 2200, steel: 1200, gas: 750 },
+    buildSeconds: 85,
   };
 }
 
-// Usines d'extraction séparées (gaz, acier, or)
 export function getExtractionCost(
   resource: ExtractionResource,
   currentLevel: number
@@ -438,7 +438,6 @@ export function getExtractionCost(
   };
 }
 
-// Défenses améliorables (conditionnées par la techno)
 export function getDefenseCost(
   defense: DefenseType,
   currentLevel: number

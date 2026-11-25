@@ -53,6 +53,7 @@ export type ClientAction =
   | { type: 'recruit'; provinceId: string; unit: UnitType; count: number }
   | { type: 'move'; fromId: string; targetId: string; units: UnitStack }
   | { type: 'turnAround'; armyId: string }
+  | { type: 'redirectArmy'; armyId: string; targetId: string }
   | { type: 'retreat'; battleId: string }
   | { type: 'diplomacy'; target: PlayableNationId; status: DiplomaticStatus }
   | { type: 'respondOffer'; offerId: string; accept: boolean };

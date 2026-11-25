@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Compass, RotateCcw, X } from 'lucide-react';
+import { UNIT_ORDER, UNIT_SPECS } from '../data/balance';
 import { isPointOnLand, MAP_HEIGHT, MAP_WIDTH } from '../data/geo';
-import { findArmyRoute, totalStack } from '../engine/combat';
+import { findArmyRoute, getMovingArmyWorldPos, totalStack } from '../engine/combat';
 import { getDiplomaticStatus } from '../engine/diplomacy';
 import type { GameState, UnitStack } from '../engine/types';
 import {
@@ -20,12 +22,12 @@ interface MapCanvasProps {
   selectedProvinceId: string | null;
   onSelectProvince: (id: string | null) => void;
   focusTarget?: [number, number] | null;
-  /** Mode déplacement au clic : province d'origine + effectifs armés */
   moveOrderFromId?: string | null;
   moveOrderUnits?: UnitStack | null;
   onConfirmMove?: (fromId: string, targetId: string, units: UnitStack) => void;
   onCancelMove?: () => void;
   onTurnAroundArmy?: (armyId: string) => void;
+  onRedirectArmy?: (armyId: string, newTargetId: string) => void;
 }
 
 export function MapCanvas({
@@ -38,17 +40,20 @@ export function MapCanvas({
   onConfirmMove,
   onCancelMove,
   onTurnAroundArmy,
+  onRedirectArmy,
 }: MapCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [camera, setCamera] = useState<Camera>({ x: 920, y: 920, zoom: 0.72 });
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [mapMode, setMapMode] = useState<MapMode>('political');
 
+  const [selectedArmyId, setSelectedArmyId] = useState<string | null>(null);
+  const [redirectingArmyId, setRedirectingArmyId] = useState<string | null>(null);
+
   const pointersRef = useRef<PointerMap>(new Map());
   const pinchStartDistRef = useRef<number | null>(null);
   const pinchStartZoomRef = useRef<number>(0.72);
 
-  // Sépare nettement l'appui court (action d'armée) du maintien/glisser (déplacer la carte)
   const gestureRef = useRef<{
     active: boolean;
     moved: boolean;
@@ -59,12 +64,60 @@ export function MapCanvas({
     camY: number;
   }>({ active: false, moved: false, downAt: 0, startX: 0, startY: 0, camX: 0, camY: 0 });
 
+  const selectedArmy = useMemo(
+    () =>
+      selectedArmyId
+        ? state.movingArmies.find(
+            (a) => a.id === selectedArmyId && a.owner === state.playerNationId
+          ) ?? null
+        : null,
+    [selectedArmyId, state.movingArmies, state.playerNationId]
+  );
+
+  const redirectingArmy = useMemo(
+    () =>
+      redirectingArmyId
+        ? state.movingArmies.find(
+            (a) => a.id === redirectingArmyId && a.owner === state.playerNationId
+          ) ?? null
+        : null,
+    [redirectingArmyId, state.movingArmies, state.playerNationId]
+  );
+
   const isTargetingMove = Boolean(
     moveOrderFromId && moveOrderUnits && totalStack(moveOrderUnits) > 0
   );
+  const isTargetingAny = isTargetingMove || Boolean(redirectingArmy);
 
-  // Calcul en direct de la trajectoire survolée quand un ordre de marche est armé
   const movePreview = useMemo<MoveOrderPreview | null>(() => {
+    if (redirectingArmy) {
+      const startPos = getMovingArmyWorldPos(state, redirectingArmy);
+      if (!hoveredId) {
+        return {
+          fromId: redirectingArmy.fromProvinceId,
+          startPos,
+          route: [],
+          isAir: redirectingArmy.isAir,
+          isSubmarineMission: redirectingArmy.isSubmarineMission,
+          isHostile: false,
+        };
+      }
+      const targetProv = state.provinces[hoveredId];
+      const isHostile =
+        Boolean(targetProv) &&
+        targetProv.owner !== state.playerNationId &&
+        getDiplomaticStatus(state, state.playerNationId, targetProv.owner) !== 'alliance';
+
+      return {
+        fromId: redirectingArmy.fromProvinceId,
+        startPos,
+        route: [hoveredId],
+        isAir: redirectingArmy.isAir,
+        isSubmarineMission: redirectingArmy.isSubmarineMission,
+        isHostile,
+      };
+    }
+
     if (!isTargetingMove || !moveOrderFromId || !moveOrderUnits) return null;
     if (!hoveredId || hoveredId === moveOrderFromId) {
       return {
@@ -98,7 +151,7 @@ export function MapCanvas({
       isSubmarineMission: found.isSubmarineMission,
       isHostile,
     };
-  }, [isTargetingMove, moveOrderFromId, moveOrderUnits, hoveredId, state]);
+  }, [redirectingArmy, isTargetingMove, moveOrderFromId, moveOrderUnits, hoveredId, state]);
 
   useEffect(() => {
     if (focusTarget) {
@@ -110,15 +163,18 @@ export function MapCanvas({
     }
   }, [focusTarget]);
 
-  // Touche Échap pour annuler un ordre de déplacement en cours
   useEffect(() => {
-    if (!isTargetingMove) return;
+    if (!isTargetingAny && !selectedArmyId) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onCancelMove?.();
+      if (e.key === 'Escape') {
+        onCancelMove?.();
+        setRedirectingArmyId(null);
+        setSelectedArmyId(null);
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isTargetingMove, onCancelMove]);
+  }, [isTargetingAny, selectedArmyId, onCancelMove]);
 
   const screenToWorld = (clientX: number, clientY: number) => {
     const canvas = canvasRef.current;
@@ -132,7 +188,6 @@ export function MapCanvas({
     };
   };
 
-  // Boucle de rendu 60 FPS
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -162,14 +217,15 @@ export function MapCanvas({
         hoveredId,
         mapMode,
         now,
-        movePreview
+        movePreview,
+        selectedArmy?.id ?? null
       );
       rafId = window.requestAnimationFrame(render);
     };
 
     rafId = window.requestAnimationFrame(render);
     return () => window.cancelAnimationFrame(rafId);
-  }, [camera, state, selectedProvinceId, hoveredId, mapMode, movePreview]);
+  }, [camera, state, selectedProvinceId, hoveredId, mapMode, movePreview, selectedArmy]);
 
   const clampCamera = (x: number, y: number, zoom: number): Camera => ({
     x: Math.min(MAP_WIDTH - 120, Math.max(120, x)),
@@ -225,7 +281,6 @@ export function MapCanvas({
     if (gestureRef.current.active) {
       const dx = e.clientX - gestureRef.current.startX;
       const dy = e.clientY - gestureRef.current.startY;
-      // Glissement > 7 px = déplacement de la carte
       if (Math.hypot(dx, dy) > 7) gestureRef.current.moved = true;
       if (gestureRef.current.moved) {
         setCamera((prev) =>
@@ -254,32 +309,39 @@ export function MapCanvas({
     const pressDurationMs = performance.now() - gestureRef.current.downAt;
     gestureRef.current.active = false;
 
-    // Maintien long (> 340 ms sur tactile sans glisser) ou glissement = navigation carte, pas d'ordre d'armée
     const isShortTap = !wasMoved && (e.pointerType !== 'touch' || pressDurationMs < 340);
 
     if (isShortTap && pointersRef.current.size === 0) {
       const { wx, wy } = screenToWorld(e.clientX, e.clientY);
 
-      // 1. Si un ordre de déplacement au clic est armé : clic sur une province valide -> envoyer, sinon annuler
+      if (redirectingArmy) {
+        const hitProv = isPointOnLand(wx, wy) ? hitTestProvince(wx, wy, state.provinces) : null;
+        if (hitProv) {
+          onRedirectArmy?.(redirectingArmy.id, hitProv);
+        }
+        setRedirectingArmyId(null);
+        setSelectedArmyId(null);
+        return;
+      }
+
       if (isTargetingMove && moveOrderFromId && moveOrderUnits) {
         const hitProv = isPointOnLand(wx, wy) ? hitTestProvince(wx, wy, state.provinces) : null;
         if (hitProv && hitProv !== moveOrderFromId) {
           onConfirmMove?.(moveOrderFromId, hitProv, moveOrderUnits);
         } else {
-          // Cliquer ailleurs (mer, même province, vide) annule l'ordre
           onCancelMove?.();
         }
         return;
       }
 
-      // 2. Clic court sur l'une de ses armées en marche -> demi-tour direct
       const hitArmy = hitTestMovingArmy(wx, wy, state);
-      if (hitArmy && !hitArmy.isReturning && onTurnAroundArmy) {
-        onTurnAroundArmy(hitArmy.id);
+      if (hitArmy) {
+        setSelectedArmyId(hitArmy.id);
+        setRedirectingArmyId(null);
         return;
       }
 
-      // 3. Sélection standard de province
+      setSelectedArmyId(null);
       const hit = isPointOnLand(wx, wy) ? hitTestProvince(wx, wy, state.provinces) : null;
       onSelectProvince(hit);
     }
@@ -296,7 +358,7 @@ export function MapCanvas({
       <canvas
         ref={canvasRef}
         className={`block h-full w-full ${
-          isTargetingMove ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'
+          isTargetingAny ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'
         }`}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -305,17 +367,30 @@ export function MapCanvas({
         onWheel={handleWheel}
       />
 
-      {/* Bandeau contextuel lorsque le mode ciblage au clic est actif */}
-      {isTargetingMove && moveOrderFromId && (
+      {isTargetingAny && (
         <div className="absolute left-1/2 top-16 z-20 flex -translate-x-1/2 items-center gap-3 rounded border border-amber-400/60 bg-stone-950/95 px-3.5 py-2 text-xs text-amber-100 shadow-2xl font-sans">
           <span>
-            <strong>Ordre de marche</strong> depuis{' '}
-            <span className="text-amber-300">{state.provinces[moveOrderFromId]?.name}</span> :
-            cliquez sur une destination (ou cliquez dans le vide pour annuler).
+            {redirectingArmy ? (
+              <>
+                <strong>Changer de direction</strong> : cliquez sur la nouvelle province cible (ou
+                dans le vide pour annuler).
+              </>
+            ) : (
+              <>
+                <strong>Ordre de marche</strong> depuis{' '}
+                <span className="text-amber-300">
+                  {moveOrderFromId ? state.provinces[moveOrderFromId]?.name : ''}
+                </span>{' '}
+                : cliquez sur une destination (ou dans le vide pour annuler).
+              </>
+            )}
           </span>
           <button
             type="button"
-            onClick={() => onCancelMove?.()}
+            onClick={() => {
+              onCancelMove?.();
+              setRedirectingArmyId(null);
+            }}
             className="rounded border border-stone-600 bg-stone-800 px-2 py-0.5 text-[11px] font-semibold text-stone-200 hover:bg-stone-700"
           >
             Annuler
@@ -323,7 +398,76 @@ export function MapCanvas({
         </div>
       )}
 
-      {/* Barre d'outils cartographiques (haut gauche) */}
+      {selectedArmy && !redirectingArmy && (
+        <div className="absolute bottom-4 left-1/2 z-30 w-72 -translate-x-1/2 rounded-lg border border-amber-500/60 bg-stone-950/96 p-3 text-xs text-stone-100 shadow-2xl backdrop-blur-sm font-sans">
+          <div className="flex items-center justify-between gap-2 border-b border-stone-800 pb-2">
+            <div>
+              <p className="font-serif text-sm font-bold text-amber-100">
+                Colonne en mouvement ({totalStack(selectedArmy.units)})
+              </p>
+              <p className="text-[11px] text-stone-400">
+                Cap :{' '}
+                <strong className="text-stone-200">
+                  {state.provinces[selectedArmy.targetProvinceId]?.name}
+                </strong>{' '}
+                •{' '}
+                <span className="font-mono text-amber-300">
+                  {Math.max(
+                    0,
+                    Math.ceil(
+                      (selectedArmy.landingEndsAt ?? selectedArmy.legArrivalAt) -
+                        state.elapsedSeconds
+                    )
+                  )}{' '}
+                  s
+                </span>
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedArmyId(null)}
+              className="rounded p-1 text-stone-400 hover:bg-stone-800 hover:text-white"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
+          <div className="mt-2 flex flex-wrap gap-1">
+            {UNIT_ORDER.filter((t) => selectedArmy.units[t] > 0).map((t) => (
+              <span
+                key={t}
+                className="rounded border border-stone-800 bg-stone-900 px-1.5 py-0.5 text-[10px] text-stone-200"
+              >
+                {selectedArmy.units[t]} {UNIT_SPECS[t].label}
+              </span>
+            ))}
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                onTurnAroundArmy?.(selectedArmy.id);
+                setSelectedArmyId(null);
+              }}
+              className="flex items-center justify-center gap-1 rounded border border-amber-500/50 bg-stone-900 py-1.5 text-[11px] font-bold text-amber-200 hover:bg-stone-800"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              Faire demi-tour
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setRedirectingArmyId(selectedArmy.id)}
+              className="flex items-center justify-center gap-1 rounded bg-amber-600 py-1.5 text-[11px] font-bold text-stone-950 hover:bg-amber-500"
+            >
+              <Compass className="h-3.5 w-3.5" />
+              Changer de cap
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="absolute left-3 top-16 z-10 flex flex-col gap-1.5 font-sans">
         <div className="flex gap-1">
           <button

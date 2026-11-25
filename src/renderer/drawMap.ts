@@ -16,6 +16,7 @@ export type MapMode = 'political' | 'diplomatic';
 
 export interface MoveOrderPreview {
   fromId: string;
+  startPos?: [number, number];
   route: string[];
   isAir: boolean;
   isSubmarineMission: boolean;
@@ -58,7 +59,6 @@ export function hitTestProvince(
   return null;
 }
 
-/** Permet de cliquer directement sur une de ses armées en mouvement (ex. demi-tour) */
 export function hitTestMovingArmy(
   wx: number,
   wy: number,
@@ -67,7 +67,7 @@ export function hitTestMovingArmy(
   for (const army of state.movingArmies) {
     if (army.owner !== state.playerNationId) continue;
     const [ax, ay] = getMovingArmyWorldPos(state, army);
-    if (Math.hypot(wx - ax, wy - ay) <= 22) {
+    if (Math.hypot(wx - ax, wy - ay) <= 24) {
       return army;
     }
   }
@@ -84,7 +84,6 @@ function getDiplomaticFillColor(state: GameState, prov: Province): string {
   return '#7a7365';
 }
 
-/** Relief topographique gravé pour les provinces montagneuses */
 function drawMountainRelief(ctx: CanvasRenderingContext2D, cx: number, cy: number) {
   ctx.save();
   ctx.strokeStyle = 'rgba(28, 24, 19, 0.34)';
@@ -108,12 +107,172 @@ function drawMountainRelief(ctx: CanvasRenderingContext2D, cx: number, cy: numbe
   ctx.restore();
 }
 
-/** Icônes tactiques sobres des infrastructures et défenses de la province */
+function drawProvinceDefensesVisuals(
+  ctx: CanvasRenderingContext2D,
+  prov: Province,
+  nowSec: number
+) {
+  const [cx, cy] = prov.center;
+  const isWeak = (def: 'trenches' | 'bunkers' | 'aa_defense' | 'naval_defense') =>
+    prov.activeWeaknesses.some((w) => w.defense === def && w.expiresAt > nowSec);
+
+  ctx.save();
+
+  // 1. TRANCHÉES (haut-gauche)
+  if (prov.defenses.trenches > 0) {
+    const lvl = prov.defenses.trenches;
+    const weak = isWeak('trenches');
+    const tx = cx - 26;
+    const ty = cy - 13;
+
+    ctx.strokeStyle = weak ? 'rgba(220, 38, 38, 0.85)' : 'rgba(92, 74, 52, 0.92)';
+    ctx.lineWidth = 3.6;
+    ctx.lineCap = 'square';
+    ctx.beginPath();
+    ctx.moveTo(tx - 8, ty + 4);
+    ctx.lineTo(tx - 4, ty - 2);
+    ctx.lineTo(tx, ty + 4);
+    ctx.lineTo(tx + 4, ty - 2);
+    ctx.lineTo(tx + 8, ty + 4);
+    ctx.stroke();
+
+    ctx.strokeStyle = '#181512';
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+
+    if (lvl >= 2) {
+      ctx.strokeStyle = weak ? '#fca5a5' : '#b8b0a0';
+      ctx.lineWidth = 0.85;
+      for (let i = -1; i <= (lvl === 3 ? 1 : 0); i++) {
+        const bx = tx + i * 6;
+        const by = ty - 5;
+        ctx.beginPath();
+        ctx.moveTo(bx - 2, by - 2);
+        ctx.lineTo(bx + 2, by + 2);
+        ctx.moveTo(bx + 2, by - 2);
+        ctx.lineTo(bx - 2, by + 2);
+        ctx.stroke();
+      }
+    }
+  }
+
+  // 2. BUNKERS (droite)
+  if (prov.defenses.bunkers > 0) {
+    const lvl = prov.defenses.bunkers;
+    const weak = isWeak('bunkers');
+    const bx = cx + 27;
+    const by = cy - 2;
+
+    ctx.fillStyle = weak ? '#7f1d1d' : '#78756e';
+    ctx.strokeStyle = weak ? '#f87171' : '#1c1a17';
+    ctx.lineWidth = 1.1;
+    ctx.beginPath();
+    ctx.moveTo(bx - 8, by + 4);
+    ctx.lineTo(bx - 6, by - 4);
+    ctx.lineTo(bx + 6, by - 4);
+    ctx.lineTo(bx + 8, by + 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#0f0e0d';
+    ctx.fillRect(bx - 4.5, by - 1.5, 9, 2.2);
+
+    if (lvl >= 2) {
+      ctx.fillStyle = '#52525b';
+      ctx.beginPath();
+      ctx.arc(bx, by - 4.2, 3.2, Math.PI, 0);
+      ctx.fill();
+      ctx.stroke();
+    }
+    if (lvl >= 3) {
+      ctx.fillStyle = '#d4af37';
+      ctx.fillRect(bx - 6, by + 5.2, 12, 1.5);
+    }
+  }
+
+  // 3. DÉFENSES AÉRIENNES / DCA (haut-droite)
+  if (prov.defenses.aa_defense > 0) {
+    const lvl = prov.defenses.aa_defense;
+    const weak = isWeak('aa_defense');
+    const ax = cx + 25;
+    const ay = cy - 17;
+
+    ctx.fillStyle = weak ? '#7f1d1d' : '#6b6250';
+    ctx.strokeStyle = weak ? '#f87171' : '#181614';
+    ctx.lineWidth = 1.1;
+    ctx.beginPath();
+    ctx.arc(ax, ay, 5.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.strokeStyle = '#e5e7eb';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(ax - 1, ay + 1);
+    ctx.lineTo(ax + 6, ay - 6.5);
+    if (lvl >= 2) {
+      ctx.moveTo(ax + 1.5, ay + 1.5);
+      ctx.lineTo(ax + 8, ay - 4.5);
+    }
+    ctx.stroke();
+
+    if (lvl >= 3) {
+      ctx.strokeStyle = weak ? 'rgba(248, 113, 113, 0.7)' : 'rgba(186, 230, 253, 0.65)';
+      ctx.lineWidth = 0.9;
+      ctx.setLineDash([2, 2]);
+      ctx.beginPath();
+      ctx.arc(ax, ay, 9, -Math.PI * 0.85, 0.1);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
+  // 4. DÉFENSES MARINES (bas-gauche)
+  if (prov.defenses.naval_defense > 0) {
+    const lvl = prov.defenses.naval_defense;
+    const weak = isWeak('naval_defense');
+    const nx = cx - 26;
+    const ny = cy + 6;
+
+    ctx.fillStyle = weak ? '#7f1d1d' : '#3d4f5f';
+    ctx.strokeStyle = weak ? '#f87171' : '#0f172a';
+    ctx.lineWidth = 1.1;
+    ctx.beginPath();
+    ctx.roundRect(nx - 6.5, ny - 3.5, 13, 7, 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(nx - 4, ny - 0.8);
+    ctx.lineTo(nx - 11.5, ny - 2.2);
+    if (lvl >= 2) {
+      ctx.moveTo(nx - 4, ny + 1.4);
+      ctx.lineTo(nx - 11.5, ny + 0.8);
+    }
+    ctx.stroke();
+
+    if (lvl >= 2) {
+      ctx.fillStyle = weak ? '#fca5a5' : '#38bdf8';
+      ctx.beginPath();
+      ctx.arc(nx - 9, ny + 5.5, 1.5, 0, Math.PI * 2);
+      if (lvl >= 3) ctx.arc(nx - 3, ny + 6.5, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  ctx.restore();
+}
+
 function drawProvinceStructures(
   ctx: CanvasRenderingContext2D,
   prov: Province,
   nowSec: number
 ) {
+  drawProvinceDefensesVisuals(ctx, prov, nowSec);
+
   const [cx, cy] = prov.center;
   const totalFactories =
     prov.extractionFactories.gold +
@@ -123,23 +282,6 @@ function drawProvinceStructures(
   const hasWeakenedDef = prov.activeWeaknesses.some((w) => w.expiresAt > nowSec);
 
   ctx.save();
-
-  // 1. Tranchées (zigzag sombre gravé autour du centre)
-  if (prov.defenses.trenches > 0) {
-    const isWeak = prov.activeWeaknesses.some(
-      (w) => w.defense === 'trenches' && w.expiresAt > nowSec
-    );
-    ctx.strokeStyle = isWeak ? 'rgba(239, 68, 68, 0.85)' : 'rgba(26, 22, 18, 0.72)';
-    ctx.lineWidth = 1.4;
-    ctx.beginPath();
-    ctx.moveTo(cx - 22, cy - 2);
-    ctx.lineTo(cx - 18, cy - 6);
-    ctx.lineTo(cx - 14, cy - 2);
-    ctx.lineTo(cx - 10, cy - 6);
-    ctx.stroke();
-  }
-
-  // 2. Pastilles compactes d'infrastructures sous le nom de la province
   const badges: { text: string; bg: string; border: string }[] = [];
 
   if (prov.hasLaboratory && prov.laboratoryLevel > 0) {
@@ -165,7 +307,7 @@ function drawProvinceStructures(
 
   if (totalDef > 0) {
     badges.push({
-      text: hasWeakenedDef ? `DÉF !` : `DÉF ${totalDef}`,
+      text: hasWeakenedDef ? 'DÉF !' : `DÉF ${totalDef}`,
       bg: hasWeakenedDef ? 'rgba(127, 29, 29, 0.94)' : 'rgba(30, 34, 30, 0.9)',
       border: hasWeakenedDef ? '#f87171' : '#9ca3af',
     });
@@ -196,7 +338,6 @@ function drawProvinceStructures(
   ctx.restore();
 }
 
-/** Effet réaliste de combat sur une province (fumée sombre, éclairs brefs, marqueur de front) */
 function drawBattleEffect(
   ctx: CanvasRenderingContext2D,
   prov: Province,
@@ -207,7 +348,6 @@ function drawBattleEffect(
   const [cx, cy] = prov.center;
   ctx.save();
 
-  // Panaches de fumée sombre d'artillerie
   for (let i = 0; i < 3; i++) {
     const phase = (timeSec * 0.7 + i * 0.33) % 1;
     const sx = cx + (i - 1) * 10 + Math.sin(timeSec + i) * 3;
@@ -218,7 +358,6 @@ function drawBattleEffect(
     ctx.fill();
   }
 
-  // Onde de choc sobre rouge sombre
   const pulse = (timeSec * 1.4) % 1;
   ctx.strokeStyle = `rgba(185, 28, 28, ${(1 - pulse) * 0.75})`;
   ctx.lineWidth = 1.6;
@@ -226,7 +365,6 @@ function drawBattleEffect(
   ctx.arc(cx, cy, 14 + pulse * 18, 0, Math.PI * 2);
   ctx.stroke();
 
-  // Bref éclair de canon
   if (Math.sin(timeSec * 14 + cx) > 0.72) {
     ctx.fillStyle = 'rgba(251, 191, 36, 0.85)';
     ctx.beginPath();
@@ -234,7 +372,6 @@ function drawBattleEffect(
     ctx.fill();
   }
 
-  // Plaquette tactique de rapport de forces
   const txt = `⚔ ${attCount} vs ${defCount}`;
   ctx.fillStyle = 'rgba(127, 29, 29, 0.94)';
   ctx.strokeStyle = '#fca5a5';
@@ -263,12 +400,12 @@ export function drawMap(
   hoveredProvinceId: string | null,
   mapMode: MapMode = 'political',
   nowMs = 0,
-  movePreview: MoveOrderPreview | null = null
+  movePreview: MoveOrderPreview | null = null,
+  selectedArmyId: string | null = null
 ): void {
   const timeSec = nowMs / 1000;
   const landPath = getEuropeLandPath();
 
-  // 1. Fond maritime réaliste (bleu-ardoise profond de carte navale 1914)
   const seaGrad = ctx.createRadialGradient(
     width * 0.5,
     height * 0.45,
@@ -287,7 +424,6 @@ export function drawMap(
   ctx.scale(camera.zoom, camera.zoom);
   ctx.translate(-camera.x, -camera.y);
 
-  // 2. Quadrillage cartographique de navigation (méridiens & parallèles discrets)
   ctx.strokeStyle = 'rgba(186, 206, 222, 0.08)';
   ctx.lineWidth = 1 / camera.zoom;
   for (let x = 0; x <= MAP_WIDTH; x += 120) {
@@ -303,7 +439,6 @@ export function drawMap(
     ctx.stroke();
   }
 
-  // 3. Halo d'eaux peu profondes autour des côtes européennes
   ctx.save();
   ctx.strokeStyle = 'rgba(116, 152, 178, 0.22)';
   ctx.lineWidth = 12;
@@ -314,22 +449,19 @@ export function drawMap(
   ctx.stroke(landPath);
   ctx.restore();
 
-  // 4. Découpage exact des provinces sur les côtes européennes réelles
   ctx.save();
   ctx.clip(landPath);
 
-  // Fond parchemin vieilli pour les terres hors-jeu (Scandinavie, Afrique du Nord, Moyen-Orient)
   ctx.fillStyle = '#4c463b';
   ctx.fillRect(0, 0, MAP_WIDTH, MAP_HEIGHT);
 
   const provinces = Object.values(state.provinces);
 
-  // Remplissage des provinces
   for (const prov of provinces) {
     if (prov.polygon.length < 3) continue;
     const isSelected = prov.id === selectedProvinceId;
     const isHovered = prov.id === hoveredProvinceId;
-    const isMoveOrigin = movePreview?.fromId === prov.id;
+    const isMoveOrigin = movePreview?.fromId === prov.id && !movePreview.startPos;
     const isOnPreviewRoute = movePreview?.route.includes(prov.id);
 
     ctx.beginPath();
@@ -339,15 +471,12 @@ export function drawMap(
     });
     ctx.closePath();
 
-    const baseFill =
+    ctx.fillStyle =
       mapMode === 'diplomatic'
         ? getDiplomaticFillColor(state, prov)
         : NATION_TEMPLATES[prov.owner].color;
-
-    ctx.fillStyle = baseFill;
     ctx.fill();
 
-    // Patine cartographique subtile (voile sombre ou éclairci au survol/sélection)
     if (isSelected || isMoveOrigin) {
       ctx.fillStyle = 'rgba(235, 210, 145, 0.26)';
       ctx.fill();
@@ -359,7 +488,6 @@ export function drawMap(
       ctx.fill();
     }
 
-    // Frontières internes nettes à l'encre sombre
     ctx.strokeStyle = isSelected
       ? '#e5c158'
       : isHovered
@@ -373,17 +501,13 @@ export function drawMap(
     }
   }
 
-  // Frontières internationales plus marquées (et ligne de front rouge en cas de guerre)
   for (const prov of provinces) {
     for (const nId of prov.neighbors) {
       if (nId <= prov.id) continue;
       const nb = state.provinces[nId];
       if (!nb || nb.owner === prov.owner) continue;
+      if (getDiplomaticStatus(state, prov.owner, nb.owner) !== 'war') continue;
 
-      const atWar = getDiplomaticStatus(state, prov.owner, nb.owner) === 'war';
-      if (!atWar) continue;
-
-      // Marqueur discret de front actif entre deux provinces en guerre
       const mx = (prov.center[0] + nb.center[0]) / 2;
       const my = (prov.center[1] + nb.center[1]) / 2;
       ctx.fillStyle = 'rgba(185, 28, 28, 0.55)';
@@ -395,12 +519,10 @@ export function drawMap(
 
   ctx.restore();
 
-  // 5. Contour précis du littoral européen
   ctx.strokeStyle = 'rgba(18, 16, 13, 0.85)';
   ctx.lineWidth = 1.6;
   ctx.stroke(landPath);
 
-  // 6. Noms des mers (typographie serif gravée)
   ctx.save();
   ctx.fillStyle = 'rgba(185, 206, 220, 0.28)';
   ctx.font = 'italic 600 13px Georgia, serif';
@@ -412,7 +534,6 @@ export function drawMap(
   }
   ctx.restore();
 
-  // 7. Liaisons maritimes principales en pointillés fins
   ctx.save();
   ctx.strokeStyle = 'rgba(186, 208, 224, 0.2)';
   ctx.lineWidth = 1.1;
@@ -430,8 +551,7 @@ export function drawMap(
   }
   ctx.restore();
 
-  // 8. Aperçu de trajectoire en mode déplacement au clic
-  if (movePreview && movePreview.route.length >= 2) {
+  if (movePreview && (movePreview.route.length >= 2 || (movePreview.startPos && movePreview.route.length >= 1))) {
     ctx.save();
     ctx.strokeStyle = movePreview.isSubmarineMission
       ? '#38bdf8'
@@ -444,12 +564,20 @@ export function drawMap(
     ctx.setLineDash([8, 5]);
     ctx.lineDashOffset = -timeSec * 28;
     ctx.beginPath();
-    movePreview.route.forEach((pId, idx) => {
-      const p = state.provinces[pId];
-      if (!p) return;
-      if (idx === 0) ctx.moveTo(p.center[0], p.center[1]);
-      else ctx.lineTo(p.center[0], p.center[1]);
-    });
+    if (movePreview.startPos) {
+      ctx.moveTo(movePreview.startPos[0], movePreview.startPos[1]);
+      movePreview.route.forEach((pId) => {
+        const p = state.provinces[pId];
+        if (p) ctx.lineTo(p.center[0], p.center[1]);
+      });
+    } else {
+      movePreview.route.forEach((pId, idx) => {
+        const p = state.provinces[pId];
+        if (!p) return;
+        if (idx === 0) ctx.moveTo(p.center[0], p.center[1]);
+        else ctx.lineTo(p.center[0], p.center[1]);
+      });
+    }
     ctx.stroke();
 
     const dest = state.provinces[movePreview.route[movePreview.route.length - 1]];
@@ -462,17 +590,13 @@ export function drawMap(
     ctx.restore();
   }
 
-  // 9. Noms des provinces, étoiles de capitales, infrastructures et garnisons
   for (const prov of provinces) {
     const [cx, cy] = prov.center;
     const intel = hasIntelOnProvince(state, prov.id);
 
-    // Nom de la province (lisible selon le zoom)
     if (camera.zoom >= 0.56 || prov.isCapital || prov.id === selectedProvinceId) {
       ctx.save();
-      ctx.font = prov.isCapital
-        ? 'bold 11.5px Georgia, serif'
-        : '600 9.5px Georgia, serif';
+      ctx.font = prov.isCapital ? 'bold 11.5px Georgia, serif' : '600 9.5px Georgia, serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       const label = prov.isCapital ? `★ ${prov.name}` : prov.name;
@@ -500,29 +624,31 @@ export function drawMap(
     }
   }
 
-  // 10. Trajectoires & pions des armées en mouvement (avec invisibilité des sous-marins)
   for (const army of state.movingArmies) {
     if (!isMovingArmyVisibleTo(state, army, state.playerNationId)) continue;
 
     const from = state.provinces[army.fromProvinceId];
     const to = state.provinces[army.toProvinceId];
-    if (!from || !to) continue;
+    if (!to) continue;
 
     const [ax, ay] = getMovingArmyWorldPos(state, army);
+    const startX = army.startPos ? army.startPos[0] : from?.center[0] ?? ax;
     const isMine = army.owner === state.playerNationId;
     const isEnemy =
       !isMine && getDiplomaticStatus(state, state.playerNationId, army.owner) !== 'alliance';
 
-    // Tracé de la route restante
     ctx.save();
-    ctx.strokeStyle = army.isSubmarineMission
-      ? 'rgba(56, 189, 248, 0.72)'
-      : army.isReturning
-      ? 'rgba(212, 175, 55, 0.75)'
-      : isEnemy
-      ? 'rgba(220, 38, 38, 0.78)'
-      : 'rgba(235, 226, 206, 0.75)';
-    ctx.lineWidth = 2.1;
+    ctx.strokeStyle =
+      army.id === selectedArmyId
+        ? '#facc15'
+        : army.isSubmarineMission
+        ? 'rgba(56, 189, 248, 0.72)'
+        : army.isReturning
+        ? 'rgba(212, 175, 55, 0.75)'
+        : isEnemy
+        ? 'rgba(220, 38, 38, 0.78)'
+        : 'rgba(235, 226, 206, 0.75)';
+    ctx.lineWidth = army.id === selectedArmyId ? 2.8 : 2.1;
     ctx.setLineDash(army.isAir ? [3, 4] : [6, 4]);
     ctx.beginPath();
     ctx.moveTo(ax, ay);
@@ -543,12 +669,13 @@ export function drawMap(
       y: ay,
       owner: army.owner,
       units: army.units,
-      facing: to.center[0] >= from.center[0] ? 1 : -1,
+      facing: to.center[0] >= startX ? 1 : -1,
       isMoving: landingLeft === undefined,
       isNaval: army.isNaval,
       isAir: army.isAir,
       isSubmarine: army.isSubmarineMission,
       isReturning: army.isReturning,
+      isSelected: army.id === selectedArmyId,
       isEnemyWarning: isEnemy,
       landingSecondsLeft: landingLeft,
       timeSec,
@@ -556,7 +683,6 @@ export function drawMap(
     });
   }
 
-  // 11. Combats en cours
   for (const battle of state.battles) {
     const prov = state.provinces[battle.provinceId];
     if (!prov) continue;

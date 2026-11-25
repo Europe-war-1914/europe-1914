@@ -32,7 +32,6 @@ export type UnitType =
 
 export type DefenseType = 'trenches' | 'aa_defense' | 'bunkers' | 'naval_defense';
 
-// Traité de non-agression (PNA) supprimé
 export type DiplomaticStatus = 'war' | 'neutral' | 'alliance';
 
 export type AiPersonality = 'expansionist' | 'fortress' | 'opportunist' | 'diplomat';
@@ -72,7 +71,7 @@ export interface UnitStack {
 
 export interface DefenseWeakness {
   defense: DefenseType;
-  expiresAt: number; // +120 s (2 minutes)
+  expiresAt: number;
 }
 
 export interface Province {
@@ -87,11 +86,11 @@ export interface Province {
   neighbors: string[];
   seaNeighbors: string[];
   baseIncome: ResourcePool;
-  hasLaboratory: boolean; // Max 1 par nation dans la capitale, détruit si conquise
-  laboratoryLevel: number; // 0 à 3
-  barracksLevel: number; // 1 à 3 (vitesse de formation de toutes les unités)
-  extractionFactories: Record<ExtractionResource, number>; // 0 à 3 (gaz, acier, or)
-  defenses: Record<DefenseType, number>; // 0 à 3
+  hasLaboratory: boolean;
+  laboratoryLevel: number;
+  barracksLevel: number;
+  extractionFactories: Record<ExtractionResource, number>;
+  defenses: Record<DefenseType, number>;
   activeWeaknesses: DefenseWeakness[];
   garrison: UnitStack;
 }
@@ -99,22 +98,23 @@ export interface Province {
 export interface MovingArmy {
   id: string;
   owner: NationId;
-  originProvinceId: string; // Province d'origine pour le demi-tour
-  fromProvinceId: string; // Début du tronçon actuel
-  toProvinceId: string; // Fin du tronçon actuel
-  targetProvinceId: string; // Destination finale
-  route: string[]; // Chemin complet calculé (terre possédée ou mer)
+  originProvinceId: string;
+  fromProvinceId: string;
+  toProvinceId: string;
+  targetProvinceId: string;
+  route: string[];
   currentLegIndex: number;
+  startPos?: [number, number];
   units: UnitStack;
   startedAt: number;
   legStartedAt: number;
   legArrivalAt: number;
-  isNaval: boolean; // Tronçon actuel en mer
-  isAir: boolean; // Escadrille aérienne
-  isSubmarineMission: boolean; // Débarquement furtif par sous-marin
-  landingStartedAt?: number; // Début du débarquement 10 s
-  landingEndsAt?: number; // Fin du débarquement 10 s
-  detectedBy?: NationId[]; // Nations qui voient ce sous-marin
+  isNaval: boolean;
+  isAir: boolean;
+  isSubmarineMission: boolean;
+  landingStartedAt?: number;
+  landingEndsAt?: number;
+  detectedBy?: NationId[];
   isReturning: boolean;
 }
 
@@ -163,10 +163,10 @@ export interface Nation {
   capitalProvinceId?: string;
   resources: ResourcePool;
   techPoints: number;
-  techLevels: Record<TechAxis, number>; // 0 à 3
-  activeAllianceWith: PlayableNationId | null; // Max 1 alliance active
+  techLevels: Record<TechAxis, number>;
+  activeAllianceWith: PlayableNationId | null;
   isEliminated: boolean;
-  lastAttackAt?: number; // Temporisation anti-attaque compulsive de l'IA
+  lastAttackAt?: number;
 }
 
 export interface DiplomaticOffer {
@@ -174,10 +174,10 @@ export interface DiplomaticOffer {
   from: PlayableNationId;
   to: PlayableNationId;
   type: 'alliance' | 'peace';
-  goldEscrow?: number; // Or bloqué pour une offre d'alliance (remboursé si refus)
+  goldEscrow?: number;
   createdAt: number;
   expiresAt: number;
-  aiDecisionAt?: number; // Délai de réflexion de l'IA avant réponse
+  aiDecisionAt?: number;
 }
 
 export interface TelegramMessage {

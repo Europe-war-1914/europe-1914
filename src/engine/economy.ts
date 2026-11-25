@@ -96,7 +96,6 @@ export function getNationIncomePerMinute(
   };
 }
 
-/** Déblocage INSTANTANÉ d'un niveau technologique contre des Points Technologiques */
 export function unlockTechnology(
   state: GameState,
   nationId: NationId,
@@ -131,7 +130,6 @@ export function unlockTechnology(
   return { ok: true };
 }
 
-/** Amélioration de la Caserne (peu chère, accélère uniquement la formation des unités) */
 export function upgradeBarracks(
   state: GameState,
   nationId: NationId,
@@ -177,7 +175,6 @@ export function upgradeBarracks(
   return { ok: true };
 }
 
-/** Amélioration du Laboratoire unique de la capitale (niv. 1 -> 3) */
 export function upgradeLaboratory(
   state: GameState,
   nationId: NationId,
@@ -226,7 +223,6 @@ export function upgradeLaboratory(
   return { ok: true };
 }
 
-/** Construction / amélioration d'une Usine d'extraction (Gaz, Acier ou Or), conditionnée par la techno */
 export function upgradeExtractionFactory(
   state: GameState,
   nationId: NationId,
@@ -283,7 +279,6 @@ export function upgradeExtractionFactory(
   return { ok: true };
 }
 
-/** Construction / amélioration d'une Défense (Tranchées, DCA, Bunkers, Défenses marines), conditionnée par la techno */
 export function upgradeDefense(
   state: GameState,
   nationId: NationId,
@@ -347,7 +342,7 @@ export function upgradeDefense(
   return { ok: true };
 }
 
-/** Recrutement de toutes les 8 unités via la Caserne */
+/** Recrutement des 8 unités via la Caserne (nécessite niveau 1 dans la technologie d'armée correspondante) */
 export function startRecruitment(
   state: GameState,
   nationId: NationId,
@@ -364,6 +359,13 @@ export function startRecruitment(
   const qty = Math.max(1, Math.min(20, Math.floor(count)));
   const spec = UNIT_SPECS[unit];
 
+  if ((nation.techLevels[spec.armyTechAxis] ?? 0) < 1) {
+    return {
+      ok: false,
+      reason: `Technologie « ${TECH_AXES_SPECS[spec.armyTechAxis].label} » niv. 1 requise pour former cette unité.`,
+    };
+  }
+
   if (spec.requiresCoastal && prov.terrain !== 'coastal' && prov.seaNeighbors.length === 0) {
     return { ok: false, reason: 'Province côtière requise pour les unités navales.' };
   }
@@ -379,7 +381,6 @@ export function startRecruitment(
 
   spendResources(nation.resources, totalCost);
 
-  // L'amélioration de la Caserne (niv. 1 -> 3) accélère uniquement la vitesse de formation
   const barracksSpeedFactor = 1 / (1 + Math.max(0, prov.barracksLevel - 1) * 0.35);
   const duration = Math.max(4, Math.round(spec.trainSeconds * barracksSpeedFactor * qty));
 
@@ -399,9 +400,7 @@ export function startRecruitment(
 export function tickEconomy(state: GameState, dtSeconds: number): void {
   const minuteFraction = dtSeconds / 60;
 
-  // 1. Revenus (Or, Acier, Gaz) + Points Technologiques (Laboratoire unique)
   for (const prov of Object.values(state.provinces)) {
-    // Nettoyage des affaiblissements temporaires de 2 minutes expirés
     if (prov.activeWeaknesses.length > 0) {
       prov.activeWeaknesses = prov.activeWeaknesses.filter(
         (w) => w.expiresAt > state.elapsedSeconds
@@ -427,7 +426,6 @@ export function tickEconomy(state: GameState, dtSeconds: number): void {
     }
   }
 
-  // 2. Finalisation des constructions
   const remainingConstructions = [];
   for (const order of state.constructions) {
     const prov = state.provinces[order.provinceId];
@@ -460,7 +458,6 @@ export function tickEconomy(state: GameState, dtSeconds: number): void {
   }
   state.constructions = remainingConstructions;
 
-  // 3. Finalisation des recrutements
   const remainingRecruitments = [];
   for (const order of state.recruitments) {
     const prov = state.provinces[order.provinceId];
@@ -482,7 +479,6 @@ export function tickEconomy(state: GameState, dtSeconds: number): void {
   }
   state.recruitments = remainingRecruitments;
 
-  // 4. Montée en puissance progressive des puissances neutres (troupes + défenses)
   if (
     state.elapsedSeconds - state.lastNeutralGrowthAt >=
     GAME_CONFIG.neutralGrowthIntervalSeconds
@@ -492,7 +488,6 @@ export function tickEconomy(state: GameState, dtSeconds: number): void {
 
     for (const prov of Object.values(state.provinces)) {
       if (prov.owner !== 'neutral') continue;
-      // Ne renforce pas une province déjà assiégée
       if (state.battles.some((b) => b.provinceId === prov.id)) continue;
 
       if (prov.garrison.soldier < 14) {

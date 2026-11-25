@@ -1,9 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
-import { Crown, Eye, LogIn, LogOut, Skull, Trophy, User, Users, X } from 'lucide-react';
+import { Crown, Eye, LogIn, LogOut, Skull, Trophy, User, Users } from 'lucide-react';
 import { soundEngine } from './audio/soundEngine';
 import { NATION_TEMPLATES, PLAYABLE_NATIONS } from './data/nations';
-import { orderMoveArmy, orderTurnAround, retreatFromBattle } from './engine/combat';
+import {
+  orderMoveArmy,
+  orderRedirectArmy,
+  orderTurnAround,
+  retreatFromBattle,
+} from './engine/combat';
 import { requestDiplomaticAction, respondToDiplomaticOffer } from './engine/diplomacy';
 import {
   startRecruitment,
@@ -83,10 +88,8 @@ export default function App() {
   const [observerDismissed, setObserverDismissed] = useState(false);
   const [techTreeOpen, setTechTreeOpen] = useState(false);
 
-  // État du mode déplacement au clic sur la carte
   const [moveOrder, setMoveOrder] = useState<{ fromId: string; units: UnitStack } | null>(null);
 
-  // Compte joueur Supabase, Classement & Boutique / Thèmes
   const [authUser, setAuthUser] = useState<{
     id: string;
     username: string;
@@ -103,7 +106,6 @@ export default function App() {
     return saved === 'night' || saved === 'tactical' ? saved : 'vintage';
   });
 
-  // État réseau multijoueur + chat diplomatique
   const socketRef = useRef<Socket | null>(null);
   const [socketNonce, setSocketNonce] = useState(0);
   const [connected, setConnected] = useState(false);
@@ -121,7 +123,6 @@ export default function App() {
   const shouldConnectSocket =
     lobbyTab === 'online' || isOnlineMatch || Boolean(window.sessionStorage.getItem(ACTIVE_ROOM_KEY));
 
-  // Retour après paiement Stripe
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const payment = params.get('payment');
@@ -141,7 +142,6 @@ export default function App() {
     }
   }, []);
 
-  // 1. Suivi de la session Supabase
   useEffect(() => {
     if (!supabase) return;
     const client = supabase;
@@ -174,7 +174,6 @@ export default function App() {
     };
   }, []);
 
-  // 2. Chargement du profil
   useEffect(() => {
     if (!supabase || !authUser) return;
     const client = supabase;
@@ -247,7 +246,6 @@ export default function App() {
     }
   };
 
-  // Boucle locale (mode Solo)
   useEffect(() => {
     if (!isSoloActive) return;
     const timer = window.setInterval(() => {
@@ -256,7 +254,6 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [isSoloActive]);
 
-  // Connexion Socket.io + reconnexion automatique
   useEffect(() => {
     if (!shouldConnectSocket) return;
 
@@ -353,7 +350,6 @@ export default function App() {
     return () => window.clearTimeout(t);
   }, [toast]);
 
-  // Effets sonores
   useEffect(() => {
     if (!state) {
       prevPhaseRef.current = null;
@@ -892,6 +888,13 @@ export default function App() {
               () => soundEngine.playMarch()
             )
           }
+          onRedirectArmy={(armyId, newTargetId) =>
+            dispatchGameAction(
+              { type: 'redirectArmy', armyId, targetId: newTargetId },
+              (draft) => orderRedirectArmy(draft, draft.playerNationId, armyId, newTargetId),
+              () => soundEngine.playMarch()
+            )
+          }
         />
       </div>
 
@@ -1112,9 +1115,6 @@ export default function App() {
           </div>
         </div>
       )}
-
-      {/* Modale d'alerte hors-lobby (inutilisée en jeu mais garde le JSX complet) */}
-      {false && <X />}
     </div>
   );
 }

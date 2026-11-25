@@ -1,7 +1,12 @@
 import http from 'node:http';
 import { Server } from 'socket.io';
 import { NATION_TEMPLATES, PLAYABLE_NATIONS } from '../src/data/nations';
-import { orderMoveArmy, orderTurnAround, retreatFromBattle } from '../src/engine/combat';
+import {
+  orderMoveArmy,
+  orderRedirectArmy,
+  orderTurnAround,
+  retreatFromBattle,
+} from '../src/engine/combat';
 import { requestDiplomaticAction, respondToDiplomaticOffer } from '../src/engine/diplomacy';
 import {
   createId,
@@ -176,7 +181,6 @@ function launchRoomGame(room: ServerRoom): void {
     if (!room.state) return;
     room.state = stepGameState(room.state, TICK_MS / 1000);
 
-    // Synchronisation ELO à chaque élimination ou fin de partie
     void syncEliminatedAndFinalElo(
       room.state,
       room.participantsByNation,
@@ -639,6 +643,9 @@ io.on('connection', (socket) => {
         break;
       case 'turnAround':
         result = orderTurnAround(state, actor, action.armyId);
+        break;
+      case 'redirectArmy':
+        result = orderRedirectArmy(state, actor, action.armyId, action.targetId);
         break;
       case 'retreat':
         result = retreatFromBattle(state, action.battleId, actor);

@@ -97,6 +97,7 @@ export function cloneGameState(state: GameState): GameState {
     movingArmies: state.movingArmies.map((a) => ({
       ...a,
       route: [...a.route],
+      startPos: a.startPos ? ([a.startPos[0], a.startPos[1]] as [number, number]) : undefined,
       detectedBy: a.detectedBy ? [...a.detectedBy] : undefined,
       units: cloneStack(a.units),
     })),
@@ -174,7 +175,6 @@ export function stepGameState(prevState: GameState, dtRealSeconds: number): Game
   tickMovementsAndCombat(state);
   tickAI(state);
 
-  // Sécurité : toute nation dont la capitale ne lui appartient plus est éliminée
   for (const nationId of PLAYABLE_NATIONS) {
     const nation = state.nations[nationId];
     if (!nation || nation.isEliminated) continue;
@@ -184,7 +184,6 @@ export function stepGameState(prevState: GameState, dtRealSeconds: number): Game
     }
   }
 
-  // Victoire uniquement lorsqu'il ne reste plus qu'une seule nation active (pas de limite de temps)
   const { standings } = getVictoryStandings(state);
   const alive = standings.filter((s) => !s.isEliminated);
 

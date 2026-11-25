@@ -83,7 +83,6 @@ export function ProvinceDrawer({
   const coastal = isCoastalProvince(province);
   const activeConstruction = state.constructions.find((c) => c.provinceId === province.id);
 
-  // Synchronise toujours le sélecteur sur le maximum réellement présent en garnison
   const clampedSelection: UnitStack = createEmptyStack();
   for (const t of UNIT_ORDER) {
     clampedSelection[t] = Math.min(province.garrison[t], Math.max(0, selectedUnits[t] ?? 0));
@@ -382,7 +381,7 @@ export function ProvinceDrawer({
               </>
             )}
 
-            {/* ONGLET 2 : CASERNE (FORMATION DES 8 UNITÉS) */}
+            {/* ONGLET 2 : CASERNE (FORMATION DES 8 UNITÉS — VERROU TECHNO NIV. 1) */}
             {tab === 'recruit' && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between rounded border border-stone-800 bg-stone-900/70 px-2.5 py-1.5 text-[11px]">
@@ -397,6 +396,7 @@ export function ProvinceDrawer({
                 {UNIT_ORDER.map((unit) => {
                   const spec = UNIT_SPECS[unit];
                   const needsCoastBlocked = Boolean(spec.requiresCoastal && !coastal);
+                  const techUnlocked = (player.techLevels[spec.armyTechAxis] ?? 0) >= 1;
                   const affordable = canAfford(player.resources, spec.cost);
 
                   return (
@@ -413,11 +413,11 @@ export function ProvinceDrawer({
                         </div>
                         <button
                           type="button"
-                          disabled={needsCoastBlocked || !affordable}
+                          disabled={!techUnlocked || needsCoastBlocked || !affordable}
                           onClick={() => onRecruit(province.id, unit, 1)}
                           className="rounded bg-amber-600 px-2.5 py-1 text-[11px] font-bold text-stone-950 hover:bg-amber-500 disabled:bg-stone-800 disabled:text-stone-500"
                         >
-                          Former
+                          {techUnlocked ? 'Former' : 'Verrouillé'}
                         </button>
                       </div>
 
@@ -428,9 +428,17 @@ export function ProvinceDrawer({
                           Or {spec.cost.gold} • Acier {spec.cost.steel}
                           {spec.cost.gas > 0 ? ` • Gaz ${spec.cost.gas}` : ''}
                         </span>
-                        {needsCoastBlocked && (
+                        {!techUnlocked ? (
+                          <button
+                            type="button"
+                            onClick={onOpenTechTree}
+                            className="font-sans text-sky-400 hover:underline"
+                          >
+                            Techno « {TECH_AXES_SPECS[spec.armyTechAxis].label} » niv. 1 →
+                          </button>
+                        ) : needsCoastBlocked ? (
                           <span className="font-sans text-red-400">Port/côte requis</span>
-                        )}
+                        ) : null}
                       </div>
                     </div>
                   );
@@ -456,7 +464,6 @@ export function ProvinceDrawer({
                     Infrastructures
                   </p>
 
-                  {/* Caserne */}
                   {(() => {
                     const isMax = province.barracksLevel >= 3;
                     const { cost } = getBarracksCost(province.barracksLevel);
@@ -488,7 +495,6 @@ export function ProvinceDrawer({
                     );
                   })()}
 
-                  {/* Laboratoire unique (capitale uniquement) */}
                   {province.hasLaboratory &&
                     (() => {
                       const isMax = province.laboratoryLevel >= 3;

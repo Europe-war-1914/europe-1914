@@ -27,7 +27,7 @@ export function createNewGame(playerNationId: PlayableNationId): GameState {
     mode: 'blitz',
     phase: 'MOBILIZATION',
     elapsedSeconds: 0,
-    maxDurationSeconds: BLITZ_CONFIG.maxDurationSeconds,
+    maxDurationSeconds: Number.POSITIVE_INFINITY,
     mobilizationDurationSeconds: BLITZ_CONFIG.mobilizationDurationSeconds,
     lastAiTickAt: 0,
     playerNationId,
@@ -47,7 +47,7 @@ export function createNewGame(playerNationId: PlayableNationId): GameState {
 
   pushTelegram(
     state,
-    'Mobilisation générale (2m30) : protégez votre capitale et préparez vos offensives pour conquérir les capitales ennemies.',
+    'Mobilisation générale (2m30) : la guerre durera jusqu’à ce qu’une seule nation tienne sa capitale !',
     'info'
   );
 
@@ -137,7 +137,7 @@ export function getVictoryStandings(state: GameState): {
   return {
     standings,
     totalVictoryPoints,
-    targetVictoryPoints: Math.ceil(totalVictoryPoints * BLITZ_CONFIG.victoryShareThreshold),
+    targetVictoryPoints: totalVictoryPoints,
     aliveCount,
   };
 }
@@ -157,7 +157,7 @@ export function stepGameState(prevState: GameState, dtRealSeconds: number): Game
     state.phase = 'WAR';
     pushTelegram(
       state,
-      'Fin de la mobilisation ! Les frontières s’ouvrent : prenez les capitales ennemies !',
+      'Fin de la mobilisation ! Les frontières s’ouvrent : éliminez les capitales adverses jusqu’à la victoire finale !',
       'danger'
     );
   }
@@ -179,13 +179,10 @@ export function stepGameState(prevState: GameState, dtRealSeconds: number): Game
   const { standings } = getVictoryStandings(state);
   const alive = standings.filter((s) => !s.isEliminated);
 
-  // Victoire dès qu'il ne reste plus qu'une seule capitale debout, ou au temps limite
+  // La partie continue tant qu'il reste au moins 2 nations en vie (ou jusqu'au dernier survivant)
   if (alive.length <= 1) {
     state.phase = 'ENDED';
     state.winnerId = alive[0]?.nationId ?? standings[0].nationId;
-  } else if (state.elapsedSeconds >= state.maxDurationSeconds) {
-    state.phase = 'ENDED';
-    state.winnerId = alive[0].nationId;
   }
 
   return state;

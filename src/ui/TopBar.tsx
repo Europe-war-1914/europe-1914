@@ -40,22 +40,22 @@ export function TopBar({
   const player = state.nations[state.playerNationId];
   const tpl = NATION_TEMPLATES[state.playerNationId];
   const income = getNationIncomePerMinute(state, state.playerNationId);
-  const { standings, targetVictoryPoints } = getVictoryStandings(state);
+  const { standings, aliveCount } = getVictoryStandings(state);
   const playerStanding = standings.find((s) => s.nationId === state.playerNationId);
   const playerVp = playerStanding?.victoryPoints ?? 0;
 
   const isMob = state.phase === 'MOBILIZATION';
-  const timeLeft = isMob
+  const clockValue = isMob
     ? state.mobilizationDurationSeconds - state.elapsedSeconds
-    : state.maxDurationSeconds - state.elapsedSeconds;
+    : state.elapsedSeconds;
 
   return (
-    <header className="absolute left-0 right-0 top-0 z-20 flex flex-nowrap sm:flex-wrap items-center justify-between gap-1 sm:gap-2 overflow-x-auto border-b border-amber-200/25 bg-stone-950/92 px-1.5 py-1 sm:px-3 sm:py-2 text-amber-50 shadow-lg backdrop-blur-sm font-sans">
+    <header className="absolute left-0 right-0 top-0 z-20 flex flex-wrap items-center justify-between gap-1.5 sm:gap-2 border-b border-amber-200/25 bg-stone-950/92 px-2.5 sm:px-3 py-1.5 sm:py-2 text-amber-50 shadow-lg backdrop-blur-sm font-sans">
       {/* Nation + Ressources */}
-      <div className="flex items-center gap-1 sm:gap-3 shrink-0">
-        <div className="flex items-center gap-1 sm:gap-2 rounded border border-amber-200/25 bg-stone-900 px-1.5 py-0.5 sm:px-2.5 sm:py-1">
+      <div className="flex flex-wrap items-center gap-1.5 sm:gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-2 rounded border border-amber-200/25 bg-stone-900 px-2 sm:px-2.5 py-0.5 sm:py-1">
           <span
-            className="h-2.5 w-2.5 sm:h-3 sm:w-3 shrink-0 rounded-full border border-white/50"
+            className="h-2.5 w-2.5 sm:h-3 sm:w-3 rounded-full border border-white/50"
             style={{ backgroundColor: tpl.color }}
           />
           <span className="font-serif text-xs sm:text-sm font-bold text-amber-100">
@@ -63,21 +63,21 @@ export function TopBar({
           </span>
         </div>
 
-        <div className="flex items-center gap-1 sm:gap-3 text-[11px] sm:text-xs">
-          <div className="flex items-center gap-1 rounded bg-stone-900/90 px-1.5 py-0.5 sm:px-2 sm:py-1 border border-stone-700/80">
-            <Coins className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0 text-amber-400" />
+        <div className="flex items-center gap-1.5 sm:gap-3 text-[11px] sm:text-xs">
+          <div className="flex items-center gap-1 rounded bg-stone-900/90 px-1.5 sm:px-2 py-0.5 sm:py-1 border border-stone-700/80">
+            <Coins className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-amber-400" />
             <span className="font-bold text-amber-100">{Math.floor(player.resources.gold)}</span>
             <span className="hidden md:inline text-emerald-400">+{income.gold}/m</span>
           </div>
 
-          <div className="flex items-center gap-1 rounded bg-stone-900/90 px-1.5 py-0.5 sm:px-2 sm:py-1 border border-stone-700/80">
-            <Wrench className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0 text-slate-300" />
+          <div className="flex items-center gap-1 rounded bg-stone-900/90 px-1.5 sm:px-2 py-0.5 sm:py-1 border border-stone-700/80">
+            <Wrench className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-slate-300" />
             <span className="font-bold text-slate-100">{Math.floor(player.resources.steel)}</span>
             <span className="hidden md:inline text-emerald-400">+{income.steel}/m</span>
           </div>
 
-          <div className="flex items-center gap-1 rounded bg-stone-900/90 px-1.5 py-0.5 sm:px-2 sm:py-1 border border-stone-700/80">
-            <Droplets className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0 text-sky-400" />
+          <div className="flex items-center gap-1 rounded bg-stone-900/90 px-1.5 sm:px-2 py-0.5 sm:py-1 border border-stone-700/80">
+            <Droplets className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-sky-400" />
             <span className="font-bold text-sky-100">{Math.floor(player.resources.oil)}</span>
             <span className="hidden md:inline text-emerald-400">+{income.oil}/m</span>
           </div>
@@ -85,30 +85,17 @@ export function TopBar({
       </div>
 
       {/* Phase & Chrono temps réel / Code salon */}
-      <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+      <div className="flex items-center gap-1.5 sm:gap-2">
         <div
-          className={`flex items-center gap-1 sm:gap-2 rounded px-1.5 py-0.5 sm:px-3 sm:py-1 text-[11px] sm:text-xs font-bold border ${
+          className={`flex items-center gap-1.5 rounded px-2 sm:px-3 py-0.5 sm:py-1 text-[11px] sm:text-xs font-bold border ${
             isMob
               ? 'border-amber-400/50 bg-amber-950/80 text-amber-200'
               : 'border-red-500/50 bg-red-950/80 text-red-200'
           }`}
         >
-          {isMob ? (
-            <Clock className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />
-          ) : (
-            <Flame className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />
-          )}
-          <span>
-            {isMob ? (
-              <>
-                <span className="hidden sm:inline">MOBILISATION</span>
-                <span className="sm:hidden">MOBIL</span>
-              </>
-            ) : (
-              'GUERRE'
-            )}
-          </span>
-          <span className="font-mono text-xs sm:text-sm">{formatClock(timeLeft)}</span>
+          {isMob ? <Clock className="h-3 w-3 sm:h-3.5 sm:w-3.5" /> : <Flame className="h-3 w-3 sm:h-3.5 sm:w-3.5" />}
+          <span>{isMob ? 'MOBILISATION' : 'GUERRE'}</span>
+          <span className="font-mono text-xs sm:text-sm">{formatClock(clockValue)}</span>
         </div>
 
         <div
@@ -120,12 +107,12 @@ export function TopBar({
         </div>
       </div>
 
-      {/* Points de victoire + Audio + Menu */}
-      <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-        <div className="flex items-center gap-1 rounded border border-amber-300/30 bg-stone-900 px-1.5 py-0.5 sm:px-2.5 sm:py-1 text-[11px] sm:text-xs">
-          <Trophy className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0 text-amber-400" />
+      {/* Capitales restantes + Audio + Menu */}
+      <div className="flex items-center gap-1.5 sm:gap-2">
+        <div className="flex items-center gap-1 rounded border border-amber-300/30 bg-stone-900 px-2 sm:px-2.5 py-0.5 sm:py-1 text-[11px] sm:text-xs">
+          <Trophy className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-amber-400" />
           <span className="font-bold text-amber-100">
-            {playerVp}/{targetVictoryPoints}
+            {aliveCount}/8 Cap. <span className="hidden md:inline">• {playerVp} PV</span>
           </span>
         </div>
 
@@ -139,17 +126,13 @@ export function TopBar({
           }`}
           title={muted ? 'Activer les effets sonores' : 'Couper les effets sonores'}
         >
-          {muted ? (
-            <VolumeX className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-          ) : (
-            <Volume2 className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-          )}
+          {muted ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
         </button>
 
         <button
           type="button"
           onClick={onReturnToLobby}
-          className="flex items-center gap-1 rounded border border-stone-700 bg-stone-900 px-1.5 py-0.5 sm:px-2.5 sm:py-1 text-[11px] sm:text-xs text-stone-300 hover:bg-stone-800 hover:text-white"
+          className="flex items-center gap-1 rounded border border-stone-700 bg-stone-900 px-2 sm:px-2.5 py-0.5 sm:py-1 text-[11px] sm:text-xs text-stone-300 hover:bg-stone-800 hover:text-white"
           title="Changer de nation / Nouvelle partie"
         >
           <RotateCcw className="h-3 w-3 sm:h-3.5 sm:w-3.5" />

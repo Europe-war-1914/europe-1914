@@ -34,10 +34,12 @@ import type {
   RoomSummary,
 } from './network/protocol';
 import { MapCanvas } from './renderer/MapCanvas';
+import { MAP_THEMES, type MapThemeId } from './renderer/mapThemes';
 import { AuthModal } from './ui/AuthModal';
 import { CommandTabs } from './ui/CommandTabs';
 import { OnlineLobby } from './ui/OnlineLobby';
 import { ProvinceDrawer } from './ui/ProvinceDrawer';
+import { ShopModal } from './ui/ShopModal';
 import { TopBar } from './ui/TopBar';
 
 const SERVER_URL =
@@ -72,10 +74,15 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [muted, setMuted] = useState<boolean>(() => soundEngine.isMuted());
 
-  // Compte joueur Supabase
+  // Compte joueur Supabase & Boutique / Thèmes
   const [authUser, setAuthUser] = useState<{ id: string; username: string } | null>(null);
   const [profile, setProfile] = useState<PlayerProfile | null>(null);
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [shopModalOpen, setShopModalOpen] = useState(false);
+  const [mapTheme, setMapTheme] = useState<MapThemeId>(() => {
+    const saved = window.localStorage.getItem('europe1914_theme');
+    return saved === 'night' || saved === 'tactical' ? saved : 'vintage';
+  });
 
   // État réseau multijoueur + chat diplomatique
   const socketRef = useRef<Socket | null>(null);
@@ -423,7 +430,7 @@ export default function App() {
     return (
       <div className="flex min-h-dvh w-full flex-col items-center justify-start sm:justify-center bg-stone-950 p-3 pb-12 sm:p-4 text-amber-50 font-sans overflow-y-auto touch-pan-y">
         <div className="w-full max-w-4xl rounded-xl border border-amber-200/30 bg-stone-900/95 p-4 sm:p-6 shadow-2xl">
-          {/* Barre de compte joueur (Supabase) */}
+          {/* Barre de compte joueur (Supabase) + Boutique */}
           {isSupabaseConfigured && (
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-stone-800 bg-stone-950/80 px-3 py-2 text-xs">
               {profile ? (
@@ -443,28 +450,48 @@ export default function App() {
                       </span>
                     )}
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleLogout}
-                    className="flex items-center gap-1 rounded border border-stone-700 bg-stone-900 px-2.5 py-1 text-stone-300 hover:bg-stone-800 hover:text-white"
-                  >
-                    <LogOut className="h-3.5 w-3.5" />
-                    Déconnexion
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShopModalOpen(true)}
+                      className="flex items-center gap-1.5 rounded border border-amber-400/50 bg-amber-950/70 px-2.5 py-1 font-semibold text-amber-200 hover:bg-amber-900/70"
+                    >
+                      <Crown className="h-3.5 w-3.5 text-amber-400" />
+                      Boutique
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleLogout}
+                      className="flex items-center gap-1 rounded border border-stone-700 bg-stone-900 px-2.5 py-1 text-stone-300 hover:bg-stone-800 hover:text-white"
+                    >
+                      <LogOut className="h-3.5 w-3.5" />
+                      Déconnexion
+                    </button>
+                  </div>
                 </>
               ) : (
                 <>
                   <span className="text-stone-400">
                     Mode Invité — connectez-vous pour sauvegarder votre ELO et vos packs.
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => setAuthModalOpen(true)}
-                    className="flex items-center gap-1.5 rounded bg-amber-600 px-3 py-1 font-bold text-stone-950 hover:bg-amber-500"
-                  >
-                    <LogIn className="h-3.5 w-3.5" />
-                    Connexion / Inscription
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShopModalOpen(true)}
+                      className="flex items-center gap-1.5 rounded border border-amber-400/50 bg-amber-950/70 px-2.5 py-1 font-semibold text-amber-200 hover:bg-amber-900/70"
+                    >
+                      <Crown className="h-3.5 w-3.5 text-amber-400" />
+                      Boutique
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAuthModalOpen(true)}
+                      className="flex items-center gap-1.5 rounded bg-amber-600 px-3 py-1 font-bold text-stone-950 hover:bg-amber-500"
+                    >
+                      <LogIn className="h-3.5 w-3.5" />
+                      Connexion / Inscription
+                    </button>
+                  </div>
                 </>
               )}
             </div>
@@ -627,10 +654,33 @@ export default function App() {
           )}
         </div>
 
+        {toast && (
+          <div className="fixed bottom-5 left-1/2 z-50 -translate-x-1/2 rounded-md border border-amber-400/60 bg-stone-900/95 px-4 py-2 text-xs font-semibold text-amber-100 shadow-xl font-sans">
+            {toast}
+          </div>
+        )}
+
         {authModalOpen && (
           <AuthModal
             onClose={() => setAuthModalOpen(false)}
             onSuccess={() => soundEngine.playSelect()}
+          />
+        )}
+
+        {shopModalOpen && (
+          <ShopModal
+            profile={profile}
+            activeTheme={mapTheme}
+            onSelectTheme={(theme) => {
+              setMapTheme(theme);
+              window.localStorage.setItem('europe1914_theme', theme);
+              soundEngine.playSelect();
+            }}
+            onOpenAuth={() => setAuthModalOpen(true)}
+            onBuyCommander={() => {
+              setToast('Paiement Stripe en cours d’activation — bientôt disponible !');
+            }}
+            onClose={() => setShopModalOpen(false)}
           />
         )}
       </div>
@@ -643,7 +693,7 @@ export default function App() {
   const finalStandings = state.phase === 'ENDED' ? getVictoryStandings(state).standings : null;
 
   return (
-    <div className="relative h-dvh w-screen overflow-hidden bg-stone-950 text-amber-50">
+    <div className={`relative h-dvh w-screen overflow-hidden ${MAP_THEMES[mapTheme].bgClass} text-amber-50`}>
       <TopBar
         state={state}
         muted={muted}
@@ -679,12 +729,17 @@ export default function App() {
         </div>
       )}
 
-      <MapCanvas
-        state={state}
-        selectedProvinceId={selectedId}
-        onSelectProvince={handleSelectProvince}
-        focusTarget={focusTarget}
-      />
+      <div
+        className="h-full w-full"
+        style={{ filter: MAP_THEMES[mapTheme].canvasFilter }}
+      >
+        <MapCanvas
+          state={state}
+          selectedProvinceId={selectedId}
+          onSelectProvince={handleSelectProvince}
+          focusTarget={focusTarget}
+        />
+      </div>
 
       {selectedProvince && (
         <ProvinceDrawer

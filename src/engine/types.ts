@@ -170,7 +170,7 @@ export interface Nation {
   shortName: string;
   color: string;
   borderColor: string;
-  lore: string;
+  lore?: string;
   isPlayer: boolean;
   personality: AiPersonality;
   resources: ResourcePool;

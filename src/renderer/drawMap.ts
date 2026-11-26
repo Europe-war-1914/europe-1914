@@ -24,7 +24,156 @@ export interface MoveOrderPreview {
 }
 
 const DEF_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp'] as const;
-const defenseSpriteCache: Partial<Record<DefenseType, HTMLImageElement | 'failed'>> = {};
+
+type CachedDefenseSprite = {
+  source: HTMLImageElement | HTMLCanvasElement;
+  ready: boolean;
+};
+
+const defenseSpriteCache: Partial<Record<DefenseType, CachedDefenseSprite | 'failed'>> = {};
+
+/** Détoure automatiquement le fond sombre uniforme des miniatures de défenses */
+function buildCutoutDefenseSprite(img: HTMLImageElement): HTMLCanvasElement | HTMLImageElement {
+  try {
+    const size = 256;
+    const work = document.createElement('canvas');
+    work.width = size;
+    work.height = size;
+    const wctx = work.getContext('2d', { willReadFrequently: true });
+    if (!wctx) return img;
+
+    wctx.drawImage(img, 0, 0, size, size);
+    const imgData = wctx.getImageData(0, 0, size, size);
+    const data = imgData.data;
+
+    const corners = [
+      0,
+      (size - 1) * 4,
+      (size - 1) * size * 4,
+      ((size - 1) * size + (size - 1)) * 4,
+    ];
+    if (corners.some((idx) => data[idx + 3] < 200)) {
+      return img;
+    }
+
+    let bgR = 0;
+    let bgG = 0;
+    let bgB = 0;
+    for (const idx of corners) {
+      bgR += data[idx];
+      bgG += data[idx + 1];
+      bgB += data[idx + 2];
+    }
+    bgR /= 4;
+    bgG /= 4;
+    bgB /= 4;
+
+    const isBackgroundPixel = (pixelIdx: number) => {
+      const i = pixelIdx * 4;
+      const dr = Math.abs(data[i] - bgR);
+      const dg = Math.abs(data[i + 1] - bgG);
+      const db = Math.abs(data[i + 2] - bgB);
+      if (dr > 11 || dg > 11 || db > 11) return false;
+      return dr * dr + dg * dg + db * db <= 256;
+    };
+
+    const colorDist = (pixelIdx: number) => {
+      const i = pixelIdx * 4;
+      return Math.hypot(data[i] - bgR, data[i + 1] - bgG, data[i + 2] - bgB);
+    };
+
+    const totalPixels = size * size;
+    const visited = new Uint8Array(totalPixels);
+    const removed = new Uint8Array(totalPixels);
+    const queue = new Int32Array(totalPixels);
+    let head = 0;
+    let tail = 0;
+
+    const tryEnqueue = (p: number) => {
+      if (visited[p]) return;
+      if (isBackgroundPixel(p)) {
+        visited[p] = 1;
+        queue[tail++] = p;
+      }
+    };
+
+    for (let x = 0; x < size; x++) {
+      tryEnqueue(x);
+      tryEnqueue((size - 1) * size + x);
+    }
+    for (let y = 0; y < size; y++) {
+      tryEnqueue(y * size);
+      tryEnqueue(y * size + (size - 1));
+    }
+
+    while (head < tail) {
+      const p = queue[head++];
+      removed[p] = 1;
+      data[p * 4 + 3] = 0;
+
+      const x = p % size;
+      const y = (p - x) / size;
+      if (x > 0) tryEnqueue(p - 1);
+      if (x < size - 1) tryEnqueue(p + 1);
+      if (y > 0) tryEnqueue(p - size);
+      if (y < size - 1) tryEnqueue(p + size);
+    }
+
+    for (let y = 1; y < size - 1; y++) {
+      for (let x = 1; x < size - 1; x++) {
+        const p = y * size + x;
+        if (removed[p]) continue;
+        if (
+          removed[p - 1] ||
+          removed[p + 1] ||
+          removed[p - size] ||
+          removed[p + size]
+        ) {
+          const d = colorDist(p);
+          if (d < 28) {
+            const factor = Math.max(0.25, Math.min(1, (d - 14) / 14));
+            data[p * 4 + 3] = Math.round(data[p * 4 + 3] * factor);
+          }
+        }
+      }
+    }
+
+    wctx.putImageData(imgData, 0, 0);
+
+    let minX = size;
+    let minY = size;
+    let maxX = 0;
+    let maxY = 0;
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        if (data[(y * size + x) * 4 + 3] > 30) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+
+    if (maxX <= minX || maxY <= minY) return img;
+
+    const pad = 2;
+    const sx = Math.max(0, minX - pad);
+    const sy = Math.max(0, minY - pad);
+    const sw = Math.min(size - sx, maxX - minX + 1 + pad * 2);
+    const sh = Math.min(size - sy, maxY - minY + 1 + pad * 2);
+
+    const trimmed = document.createElement('canvas');
+    trimmed.width = sw;
+    trimmed.height = sh;
+    const tctx = trimmed.getContext('2d');
+    if (!tctx) return work;
+    tctx.drawImage(work, sx, sy, sw, sh, 0, 0, sw, sh);
+    return trimmed;
+  } catch {
+    return img;
+  }
+}
 
 function loadDefenseSprite(def: DefenseType, extIndex = 0) {
   if (extIndex >= DEF_EXTENSIONS.length) {
@@ -32,19 +181,23 @@ function loadDefenseSprite(def: DefenseType, extIndex = 0) {
     return;
   }
   const img = new Image();
+  img.onload = () => {
+    const cutout = buildCutoutDefenseSprite(img);
+    defenseSpriteCache[def] = { source: cutout, ready: true };
+  };
   img.onerror = () => {
     loadDefenseSprite(def, extIndex + 1);
   };
   img.src = `/defenses/${def}.${DEF_EXTENSIONS[extIndex]}`;
-  defenseSpriteCache[def] = img;
+  defenseSpriteCache[def] = { source: img, ready: false };
 }
 
-function getDefenseSprite(def: DefenseType): HTMLImageElement | null {
+function getDefenseSprite(def: DefenseType): HTMLImageElement | HTMLCanvasElement | null {
   if (typeof window === 'undefined') return null;
   const cached = defenseSpriteCache[def];
   if (cached === 'failed') return null;
   if (cached) {
-    return cached.complete && cached.naturalWidth > 0 ? cached : null;
+    return cached.ready ? cached.source : null;
   }
   loadDefenseSprite(def, 0);
   return null;
@@ -143,34 +296,45 @@ function drawDefenseSpriteTile(
   weakened: boolean
 ) {
   const sprite = getDefenseSprite(def);
-  const w = 22;
-  const h = 18;
 
   ctx.save();
   ctx.translate(x, y);
 
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-  ctx.beginPath();
-  ctx.roundRect(-w / 2 + 1.5, -h / 2 + 2, w, h, 2.5);
-  ctx.fill();
+  // Halo rouge au sol si la défense est affaiblie
+  if (weakened) {
+    ctx.strokeStyle = 'rgba(239, 68, 68, 0.85)';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.ellipse(0, 6, 16, 6, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
 
-  ctx.fillStyle = weakened ? '#450a0a' : '#1f1d1a';
+  // Ombre douce au sol sous la miniature (sans carré)
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.38)';
   ctx.beginPath();
-  ctx.roundRect(-w / 2, -h / 2, w, h, 2.5);
+  ctx.ellipse(0, 6, 13.5, 4.8, 0, 0, Math.PI * 2);
   ctx.fill();
 
   if (sprite) {
-    ctx.save();
-    ctx.beginPath();
-    ctx.roundRect(-w / 2 + 1, -h / 2 + 1, w - 2, h - 2, 1.8);
-    ctx.clip();
-    ctx.drawImage(sprite, -w / 2 + 1, -h / 2 + 1, w - 2, h - 2);
-    if (weakened) {
-      ctx.fillStyle = 'rgba(220, 38, 38, 0.38)';
-      ctx.fillRect(-w / 2, -h / 2, w, h);
-    }
-    ctx.restore();
+    const sw = sprite instanceof HTMLImageElement ? sprite.naturalWidth : sprite.width;
+    const sh = sprite instanceof HTMLImageElement ? sprite.naturalHeight : sprite.height;
+    const maxDim = 34;
+    const ratio = Math.min(maxDim / Math.max(1, sw), maxDim / Math.max(1, sh));
+    const dw = sw * ratio;
+    const dh = sh * ratio;
+
+    if (weakened) ctx.globalAlpha = 0.72;
+    ctx.drawImage(sprite, -dw / 2, -dh / 2 - 2, dw, dh);
+    ctx.globalAlpha = 1;
   } else {
+    ctx.fillStyle = weakened ? '#450a0a' : 'rgba(20, 19, 17, 0.88)';
+    ctx.strokeStyle = weakened ? '#ef4444' : '#8c8370';
+    ctx.lineWidth = 1.1;
+    ctx.beginPath();
+    ctx.arc(0, -1, 10, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
     ctx.fillStyle = weakened ? '#fca5a5' : '#d6ccb8';
     ctx.font = 'bold 6.5px ui-monospace, monospace';
     ctx.textAlign = 'center';
@@ -181,28 +345,23 @@ function drawDefenseSpriteTile(
       aa_defense: 'DCA',
       naval_defense: 'MER',
     };
-    ctx.fillText(labels[def], 0, 0);
+    ctx.fillText(labels[def], 0, -0.5);
   }
 
-  ctx.strokeStyle = weakened ? '#ef4444' : level >= 3 ? '#d4af37' : '#8c8370';
-  ctx.lineWidth = weakened ? 1.4 : 1;
+  // Petite pastille de niveau discrète dans le coin bas droit
+  ctx.fillStyle = weakened ? '#991b1b' : 'rgba(12, 11, 10, 0.92)';
+  ctx.strokeStyle = weakened ? '#fca5a5' : level >= 3 ? '#d4af37' : '#c2b69e';
+  ctx.lineWidth = 0.85;
   ctx.beginPath();
-  ctx.roundRect(-w / 2, -h / 2, w, h, 2.5);
-  ctx.stroke();
-
-  ctx.fillStyle = weakened ? '#991b1b' : '#0c0b0a';
-  ctx.strokeStyle = weakened ? '#fca5a5' : '#c2b69e';
-  ctx.lineWidth = 0.75;
-  ctx.beginPath();
-  ctx.roundRect(w / 2 - 7.5, h / 2 - 7.5, 9, 9, 2);
+  ctx.roundRect(7, 3, 10, 10, 2);
   ctx.fill();
   ctx.stroke();
 
   ctx.fillStyle = '#f8f4e8';
-  ctx.font = 'bold 6.8px ui-monospace, monospace';
+  ctx.font = 'bold 7.2px ui-monospace, monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(weakened ? '!' : String(level), w / 2 - 3, h / 2 - 2.8);
+  ctx.fillText(weakened ? '!' : String(level), 12, 8.2);
 
   ctx.restore();
 }
@@ -220,8 +379,8 @@ function drawProvinceDefensesVisuals(
     drawDefenseSpriteTile(
       ctx,
       'trenches',
-      cx - 35,
-      cy - 11,
+      cx - 38,
+      cy - 13,
       prov.defenses.trenches,
       isWeak('trenches')
     );
@@ -230,8 +389,8 @@ function drawProvinceDefensesVisuals(
     drawDefenseSpriteTile(
       ctx,
       'naval_defense',
-      cx - 35,
-      cy + 9,
+      cx - 38,
+      cy + 13,
       prov.defenses.naval_defense,
       isWeak('naval_defense')
     );
@@ -240,8 +399,8 @@ function drawProvinceDefensesVisuals(
     drawDefenseSpriteTile(
       ctx,
       'aa_defense',
-      cx + 35,
-      cy - 11,
+      cx + 38,
+      cy - 13,
       prov.defenses.aa_defense,
       isWeak('aa_defense')
     );
@@ -250,8 +409,8 @@ function drawProvinceDefensesVisuals(
     drawDefenseSpriteTile(
       ctx,
       'bunkers',
-      cx + 35,
-      cy + 9,
+      cx + 38,
+      cy + 13,
       prov.defenses.bunkers,
       isWeak('bunkers')
     );

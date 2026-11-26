@@ -1,8 +1,9 @@
 import { getEuropeLandPath, isPointOnLand, MAP_HEIGHT, MAP_WIDTH, projectGeo } from '../data/geo';
 import { NATION_TEMPLATES } from '../data/nations';
-import { getCoastalLandingPos, getMovingArmyWorldPos, totalStack } from '../engine/combat';
+import { getMovingArmyWorldPos, totalStack } from '../engine/combat';
 import { getDiplomaticStatus } from '../engine/diplomacy';
 import { hasIntelOnProvince, isMovingArmyVisibleTo } from '../engine/visibility';
+import { getCoastalLandingPos, getUnitVirtualZone } from '../engine/zones';
 import type { DefenseType, GameState, MovingArmy, Province } from '../engine/types';
 import { drawFogUnknownToken, drawUnitToken } from './drawUnits';
 
@@ -34,13 +35,12 @@ const defenseSpriteCache: Partial<Record<DefenseType, CachedDefenseSprite | 'fai
 
 let cachedSeaNodes: [number, number][] | null = null;
 
-/** Génère un réseau de points de navigation situés en mer, à distance des côtes (~32 px) */
 function getSeaNavigationNodes(): [number, number][] {
   if (cachedSeaNodes) return cachedSeaNodes;
 
   const nodes: [number, number][] = [];
   const step = 64;
-  const coastClearance = 28; // ~ taille d'un soldat / pion entre la côte et le bateau
+  const coastClearance = 28;
 
   for (let y = 90; y <= MAP_HEIGHT - 90; y += step) {
     for (let x = 90; x <= MAP_WIDTH - 90; x += step) {
@@ -66,11 +66,13 @@ function getSeaNavigationNodes(): [number, number][] {
   return nodes;
 }
 
-/** Vérifie qu'un segment entre deux points reste entièrement en mer et à distance des côtes */
-function isSegmentClearAtSea(a: [number, number], b: [number, number]): boolean {
+function isSegmentClearAtSea(
+  a: [number, number],
+  b: [number, number],
+  clearance = 26
+): boolean {
   const dist = Math.hypot(b[0] - a[0], b[1] - a[1]);
-  const steps = Math.max(4, Math.ceil(dist / 16));
-  const clearance = 26;
+  const steps = Math.max(4, Math.ceil(dist / 14));
 
   for (let i = 1; i < steps; i++) {
     const t = i / steps;
@@ -78,9 +80,11 @@ function isSegmentClearAtSea(a: [number, number], b: [number, number]): boolean 
     const py = a[1] + (b[1] - a[1]) * t;
     if (isPointOnLand(px, py)) return false;
 
-    for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 2) {
-      if (isPointOnLand(px + Math.cos(angle) * clearance, py + Math.sin(angle) * clearance)) {
-        return false;
+    if (clearance > 0) {
+      for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 2) {
+        if (isPointOnLand(px + Math.cos(angle) * clearance, py + Math.sin(angle) * clearance)) {
+          return false;
+        }
       }
     }
   }
@@ -88,7 +92,6 @@ function isSegmentClearAtSea(a: [number, number], b: [number, number]): boolean 
   return true;
 }
 
-/** Trouve le point en mer le plus proche d'une position donnée */
 function findNearestSeaNode(pt: [number, number], nodes: [number, number][]): [number, number] | null {
   let best: [number, number] | null = null;
   let bestDist = Infinity;
@@ -102,12 +105,11 @@ function findNearestSeaNode(pt: [number, number], nodes: [number, number][]): [n
   return best;
 }
 
-/** Calcule un chemin maritime contournant les terres au large des côtes */
 export function computeSeaPolyline(
   startPt: [number, number],
   endPt: [number, number]
 ): [number, number][] {
-  if (isSegmentClearAtSea(startPt, endPt)) {
+  if (isSegmentClearAtSea(startPt, endPt, 0)) {
     return [startPt, endPt];
   }
 
@@ -124,12 +126,10 @@ export function computeSeaPolyline(
 
   const dist = new Map<string, number>();
   const prev = new Map<string, [number, number]>();
-  const nodeByKey = new Map<string, [number, number]>();
   const visited = new Set<string>();
   const open: [number, number][] = [startNode];
 
   dist.set(startKey, 0);
-  nodeByKey.set(startKey, startNode);
 
   let iterations = 0;
   while (open.length > 0 && iterations < 1800) {
@@ -149,16 +149,14 @@ export function computeSeaPolyline(
       if (d === 0 || d > 145) continue;
       const nbKey = keyOf(nb);
       if (visited.has(nbKey)) continue;
-      if (!isSegmentClearAtSea(curr, nb)) continue;
+      if (!isSegmentClearAtSea(curr, nb, 26)) continue;
 
-      // Léger biais vers la cible pour éviter d'explorer toute la carte
       const heuristicBias = Math.hypot(nb[0] - goalNode[0], nb[1] - goalNode[1]) * 0.25;
       const candidateCost = baseCost + d + heuristicBias;
 
       if (candidateCost < (dist.get(nbKey) ?? Infinity)) {
         dist.set(nbKey, candidateCost);
         prev.set(nbKey, curr);
-        nodeByKey.set(nbKey, nb);
         open.push(nb);
       }
     }
@@ -184,8 +182,9 @@ export function computeSeaPolyline(
       full.push(pt);
     }
   }
-  const lastPt = full[full.length - 1];
-  if (Math.hypot(endPt[0] - lastPt[0], endPt[1] - lastPt[1]) > 4) {
+
+  const lastSeaPt = full[full.length - 1];
+  if (Math.hypot(endPt[0] - lastSeaPt[0], endPt[1] - lastSeaPt[1]) > 2) {
     full.push(endPt);
   }
 
@@ -859,7 +858,7 @@ export function drawMap(
   }
   ctx.restore();
 
-  // Aperçu de trajectoire (en mer au large des côtes si mission navale / sous-marine)
+  // Aperçu selon la zone virtuelle (zone MER au large des côtes vs zone TERRE)
   if (
     movePreview &&
     (movePreview.route.length >= 2 || (movePreview.startPos && movePreview.route.length >= 1))
@@ -937,7 +936,7 @@ export function drawMap(
     }
   }
 
-  // Trajectoires & pions des armées en mouvement
+  // Trajectoires & pions des armées selon leur zone virtuelle (MER / TERRE)
   for (const army of state.movingArmies) {
     if (!isMovingArmyVisibleTo(state, army, state.playerNationId)) continue;
 
@@ -952,13 +951,20 @@ export function drawMap(
     const isEnemy =
       !isMine && getDiplomaticStatus(state, state.playerNationId, army.owner) !== 'alliance';
 
+    const zone = getUnitVirtualZone(
+      army.units,
+      army.isNaval,
+      army.isSubmarineMission,
+      [ax, ay]
+    );
+
     const endPt =
       army.isSubmarineMission && !army.landingCompleted
         ? getCoastalLandingPos(finalDest, [ax, ay])
         : finalDest.center;
 
     const linePts =
-      (army.isNaval || army.isSubmarineMission) && !army.isAir
+      zone === 'MER' && !army.isAir
         ? computeSeaPolyline([ax, ay], endPt)
         : [[ax, ay] as [number, number], endPt];
 
@@ -966,7 +972,7 @@ export function drawMap(
     ctx.strokeStyle =
       army.id === selectedArmyId
         ? '#facc15'
-        : army.isSubmarineMission
+        : zone === 'MER'
         ? 'rgba(56, 189, 248, 0.72)'
         : army.isReturning
         ? 'rgba(212, 175, 55, 0.75)'
@@ -995,7 +1001,7 @@ export function drawMap(
       units: army.units,
       facing: to.center[0] >= startX ? 1 : -1,
       isMoving: landingLeft === undefined && !army.clashPos,
-      isNaval: army.isNaval,
+      isNaval: army.isNaval || zone === 'MER',
       isAir: army.isAir,
       isSubmarine: army.isSubmarineMission,
       isReturning: army.isReturning,

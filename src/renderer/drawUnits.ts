@@ -21,8 +21,154 @@ export interface UnitTokenOptions {
   scale?: number;
 }
 
-const IMAGE_EXTENSIONS = ['png', 'jpg', 'webp'] as const;
-const spriteCache: Partial<Record<UnitType, HTMLImageElement | 'failed'>> = {};
+const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp'] as const;
+
+type CachedSprite = {
+  source: HTMLImageElement | HTMLCanvasElement;
+  ready: boolean;
+};
+
+const spriteCache: Partial<Record<UnitType, CachedSprite | 'failed'>> = {};
+
+/** Détoure automatiquement le fond sombre uniforme des sprites JPG/PNG opaques */
+function buildCutoutSprite(img: HTMLImageElement): HTMLCanvasElement | HTMLImageElement {
+  try {
+    const size = 160;
+    const work = document.createElement('canvas');
+    work.width = size;
+    work.height = size;
+    const wctx = work.getContext('2d', { willReadFrequently: true });
+    if (!wctx) return img;
+
+    wctx.drawImage(img, 0, 0, size, size);
+    const imgData = wctx.getImageData(0, 0, size, size);
+    const data = imgData.data;
+
+    // Si l'image a déjà de la transparence dans les coins, on la garde telle quelle
+    const corners = [
+      0,
+      (size - 1) * 4,
+      (size - 1) * size * 4,
+      ((size - 1) * size + (size - 1)) * 4,
+    ];
+    if (corners.some((idx) => data[idx + 3] < 200)) {
+      return img;
+    }
+
+    // Couleur moyenne du fond à partir des 4 coins
+    let bgR = 0;
+    let bgG = 0;
+    let bgB = 0;
+    for (const idx of corners) {
+      bgR += data[idx];
+      bgG += data[idx + 1];
+      bgB += data[idx + 2];
+    }
+    bgR /= 4;
+    bgG /= 4;
+    bgB /= 4;
+
+    const colorDist = (pixelIdx: number) => {
+      const i = pixelIdx * 4;
+      return Math.hypot(data[i] - bgR, data[i + 1] - bgG, data[i + 2] - bgB);
+    };
+
+    // Flood-fill depuis les bords pour supprimer uniquement le fond extérieur
+    const totalPixels = size * size;
+    const visited = new Uint8Array(totalPixels);
+    const removed = new Uint8Array(totalPixels);
+    const queue = new Int32Array(totalPixels);
+    let head = 0;
+    let tail = 0;
+    const threshold = 40;
+
+    const tryEnqueue = (p: number) => {
+      if (visited[p]) return;
+      if (colorDist(p) <= threshold) {
+        visited[p] = 1;
+        queue[tail++] = p;
+      }
+    };
+
+    for (let x = 0; x < size; x++) {
+      tryEnqueue(x);
+      tryEnqueue((size - 1) * size + x);
+    }
+    for (let y = 0; y < size; y++) {
+      tryEnqueue(y * size);
+      tryEnqueue(y * size + (size - 1));
+    }
+
+    while (head < tail) {
+      const p = queue[head++];
+      removed[p] = 1;
+      data[p * 4 + 3] = 0;
+
+      const x = p % size;
+      const y = (p - x) / size;
+      if (x > 0) tryEnqueue(p - 1);
+      if (x < size - 1) tryEnqueue(p + 1);
+      if (y > 0) tryEnqueue(p - size);
+      if (y < size - 1) tryEnqueue(p + size);
+    }
+
+    // Adoucissement léger de la bordure pour éviter un halo sombre
+    for (let y = 1; y < size - 1; y++) {
+      for (let x = 1; x < size - 1; x++) {
+        const p = y * size + x;
+        if (removed[p]) continue;
+        if (
+          removed[p - 1] ||
+          removed[p + 1] ||
+          removed[p - size] ||
+          removed[p + size]
+        ) {
+          const d = colorDist(p);
+          if (d < 68) {
+            const factor = Math.max(0, Math.min(1, (d - 28) / 40));
+            data[p * 4 + 3] = Math.round(data[p * 4 + 3] * factor);
+          }
+        }
+      }
+    }
+
+    wctx.putImageData(imgData, 0, 0);
+
+    // Recadrage serré autour de la figurine détourée
+    let minX = size;
+    let minY = size;
+    let maxX = 0;
+    let maxY = 0;
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        if (data[(y * size + x) * 4 + 3] > 25) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+
+    if (maxX <= minX || maxY <= minY) return img;
+
+    const pad = 2;
+    const sx = Math.max(0, minX - pad);
+    const sy = Math.max(0, minY - pad);
+    const sw = Math.min(size - sx, maxX - minX + 1 + pad * 2);
+    const sh = Math.min(size - sy, maxY - minY + 1 + pad * 2);
+
+    const trimmed = document.createElement('canvas');
+    trimmed.width = sw;
+    trimmed.height = sh;
+    const tctx = trimmed.getContext('2d');
+    if (!tctx) return work;
+    tctx.drawImage(work, sx, sy, sw, sh, 0, 0, sw, sh);
+    return trimmed;
+  } catch {
+    return img;
+  }
+}
 
 function loadUnitSprite(unit: UnitType, extIndex = 0) {
   if (extIndex >= IMAGE_EXTENSIONS.length) {
@@ -30,19 +176,23 @@ function loadUnitSprite(unit: UnitType, extIndex = 0) {
     return;
   }
   const img = new Image();
+  img.onload = () => {
+    const cutout = buildCutoutSprite(img);
+    spriteCache[unit] = { source: cutout, ready: true };
+  };
   img.onerror = () => {
     loadUnitSprite(unit, extIndex + 1);
   };
   img.src = `/units/${unit}.${IMAGE_EXTENSIONS[extIndex]}`;
-  spriteCache[unit] = img;
+  spriteCache[unit] = { source: img, ready: false };
 }
 
-export function getUnitSprite(unit: UnitType): HTMLImageElement | null {
+export function getUnitSprite(unit: UnitType): HTMLImageElement | HTMLCanvasElement | null {
   if (typeof window === 'undefined') return null;
   const cached = spriteCache[unit];
   if (cached === 'failed') return null;
   if (cached) {
-    return cached.complete && cached.naturalWidth > 0 ? cached : null;
+    return cached.ready ? cached.source : null;
   }
   loadUnitSprite(unit, 0);
   return null;
@@ -72,8 +222,8 @@ function getStackTotal(units: UnitStack): number {
 }
 
 function drawMiniFlag(ctx: CanvasRenderingContext2D, owner: NationId, x: number, y: number) {
-  const w = 12;
-  const h = 7.5;
+  const w = 13;
+  const h = 8.5;
   ctx.save();
   ctx.translate(x, y);
   ctx.beginPath();
@@ -161,14 +311,22 @@ function drawMiniFlag(ctx: CanvasRenderingContext2D, owner: NationId, x: number,
   }
   ctx.restore();
 
-  ctx.strokeStyle = 'rgba(0,0,0,0.8)';
-  ctx.lineWidth = 0.8;
+  ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+  ctx.lineWidth = 0.85;
   ctx.strokeRect(x, y, w, h);
 }
 
-function drawTacticalFallback(ctx: CanvasRenderingContext2D, unit: UnitType) {
+function drawTacticalFallback(ctx: CanvasRenderingContext2D, unit: UnitType, color: string) {
   ctx.save();
-  ctx.fillStyle = '#d6ccb8';
+  ctx.fillStyle = 'rgba(18, 17, 15, 0.88)';
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.arc(0, -4, 12, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = '#f3efe6';
   ctx.font = 'bold 7.5px Georgia, serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -182,7 +340,7 @@ function drawTacticalFallback(ctx: CanvasRenderingContext2D, unit: UnitType) {
     submarine: 'U-BT',
     frigate: 'FRG',
   };
-  ctx.fillText(tags[unit], 0, 2.5);
+  ctx.fillText(tags[unit], 0, -3.5);
   ctx.restore();
 }
 
@@ -196,6 +354,7 @@ export function drawUnitToken(ctx: CanvasRenderingContext2D, opts: UnitTokenOpti
     owner,
     units,
     facing = 1,
+    isMoving = false,
     isNaval = false,
     isAir = false,
     isSubmarine = false,
@@ -211,113 +370,70 @@ export function drawUnitToken(ctx: CanvasRenderingContext2D, opts: UnitTokenOpti
   const tpl = NATION_TEMPLATES[owner];
   const dominant = getDominantUnitType(units, isNaval, isAir, isSubmarine);
   const sprite = getUnitSprite(dominant);
-
-  const cardW = 46;
-  const cardH = 34;
-  const headerH = 5;
+  const bob = isMoving ? Math.sin(timeSec * 8 + x * 0.06) * 1.1 : 0;
 
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(scale, scale);
 
   if (isSubmarine && landingSecondsLeft === undefined) {
-    ctx.globalAlpha = 0.85;
+    ctx.globalAlpha = 0.82;
   }
 
-  if (isSelected) {
-    const pulse = 0.7 + 0.3 * Math.sin(timeSec * 6);
-    ctx.strokeStyle = `rgba(250, 204, 21, ${pulse})`;
-    ctx.lineWidth = 2.6;
+  // Anneau au sol si sélectionné / alerte ennemie / débarquement
+  if (isSelected || isEnemyWarning || landingSecondsLeft !== undefined) {
+    const pulse = 0.65 + 0.35 * Math.sin(timeSec * 7);
+    ctx.strokeStyle =
+      landingSecondsLeft !== undefined || isEnemyWarning
+        ? `rgba(239, 68, 68, ${pulse})`
+        : `rgba(250, 204, 21, ${pulse})`;
+    ctx.lineWidth = 2.1;
     ctx.beginPath();
-    ctx.roundRect(-cardW / 2 - 3.5, -cardH / 2 - 3.5, cardW + 7, cardH + 7, 5);
+    ctx.ellipse(0, 7, 21, 7.5, 0, 0, Math.PI * 2);
     ctx.stroke();
   }
 
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.56)';
+  // Ombre douce au sol sous la figurine (sans carré)
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.42)';
   ctx.beginPath();
-  ctx.roundRect(-cardW / 2 + 2, -cardH / 2 + 3, cardW, cardH, 3.5);
+  ctx.ellipse(0, 7, 17, 5.8, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  const bgGrad = ctx.createLinearGradient(0, -cardH / 2, 0, cardH / 2);
-  bgGrad.addColorStop(0, '#2a2723');
-  bgGrad.addColorStop(1, '#12110f');
-  ctx.fillStyle = bgGrad;
-  ctx.beginPath();
-  ctx.roundRect(-cardW / 2, -cardH / 2, cardW, cardH, 3);
-  ctx.fill();
-
-  const imgX = -cardW / 2 + 1.5;
-  const imgY = -cardH / 2 + headerH + 1;
-  const imgW = cardW - 3;
-  const imgH = cardH - headerH - 2.5;
-
+  // Figurine détourée posée directement sur la carte
   if (sprite) {
+    const sw = sprite instanceof HTMLImageElement ? sprite.naturalWidth : sprite.width;
+    const sh = sprite instanceof HTMLImageElement ? sprite.naturalHeight : sprite.height;
+    const maxDim = isAir ? 48 : 44;
+    const ratio = Math.min(maxDim / Math.max(1, sw), maxDim / Math.max(1, sh));
+    const dw = sw * ratio;
+    const dh = sh * ratio;
+
     ctx.save();
-    ctx.beginPath();
-    ctx.roundRect(imgX, imgY, imgW, imgH, [0, 0, 2, 2]);
-    ctx.clip();
-
-    const srcRatio = sprite.naturalWidth / sprite.naturalHeight;
-    const dstRatio = imgW / imgH;
-    let sx = 0;
-    let sy = 0;
-    let sw = sprite.naturalWidth;
-    let sh = sprite.naturalHeight;
-    if (srcRatio > dstRatio) {
-      sw = sprite.naturalHeight * dstRatio;
-      sx = (sprite.naturalWidth - sw) / 2;
-    } else {
-      sh = sprite.naturalWidth / dstRatio;
-      sy = (sprite.naturalHeight - sh) / 2;
-    }
-
-    if (facing === -1) {
-      ctx.scale(-1, 1);
-      ctx.drawImage(sprite, sx, sy, sw, sh, -imgX - imgW, imgY, imgW, imgH);
-    } else {
-      ctx.drawImage(sprite, sx, sy, sw, sh, imgX, imgY, imgW, imgH);
-    }
-
-    const vig = ctx.createLinearGradient(0, imgY, 0, imgY + imgH);
-    vig.addColorStop(0, 'rgba(0,0,0,0.14)');
-    vig.addColorStop(0.6, 'rgba(0,0,0,0)');
-    vig.addColorStop(1, 'rgba(0,0,0,0.35)');
-    ctx.fillStyle = vig;
-    ctx.fillRect(imgX, imgY, imgW, imgH);
+    ctx.translate(0, (isAir ? -10 : -5) + bob);
+    if (facing === -1) ctx.scale(-1, 1);
+    ctx.drawImage(sprite, -dw / 2, -dh / 2, dw, dh);
     ctx.restore();
   } else {
-    drawTacticalFallback(ctx, dominant);
+    drawTacticalFallback(ctx, dominant, tpl.color);
   }
 
-  ctx.fillStyle = tpl.color;
-  ctx.beginPath();
-  ctx.roundRect(-cardW / 2 + 1, -cardH / 2 + 1, cardW - 2, headerH, [2, 2, 0, 0]);
-  ctx.fill();
-
-  ctx.strokeStyle =
-    landingSecondsLeft !== undefined || isEnemyWarning
-      ? '#ef4444'
-      : isSelected
-      ? '#facc15'
-      : isCapital
-      ? '#d4af37'
-      : '#9a907c';
-  ctx.lineWidth = isSelected || isCapital || isEnemyWarning ? 1.6 : 1.15;
-  ctx.beginPath();
-  ctx.roundRect(-cardW / 2, -cardH / 2, cardW, cardH, 3);
-  ctx.stroke();
-
-  drawMiniFlag(ctx, owner, -cardW / 2 - 3, -cardH / 2 - 3.5);
-
+  // Petit drapeau + pastille compacte d'effectif sous la figurine
   const label = isReturning ? `↩${total}` : String(total);
-  const pillW = Math.max(17, label.length * 6.2 + 7);
+  const pillW = Math.max(20, label.length * 6.2 + 9);
   const pillH = 12;
+  const totalBadgeW = 13 + 3 + pillW;
+  const startX = -totalBadgeW / 2;
+  const badgeY = 9;
+
   ctx.globalAlpha = 1;
-  ctx.fillStyle = 'rgba(12, 11, 10, 0.96)';
-  ctx.strokeStyle = isCapital ? '#d4af37' : '#b8ae99';
-  ctx.lineWidth = 1;
+  drawMiniFlag(ctx, owner, startX, badgeY + 1.8);
+
+  const pillX = startX + 16;
+  ctx.fillStyle = 'rgba(12, 11, 10, 0.94)';
+  ctx.strokeStyle = isCapital ? '#d4af37' : isEnemyWarning ? '#ef4444' : '#b8ae99';
+  ctx.lineWidth = isCapital || isEnemyWarning ? 1.25 : 0.95;
   ctx.beginPath();
-  ctx.roundRect(cardW / 2 - pillW + 3.5, cardH / 2 - pillH + 3.5, pillW, pillH, 2.5);
+  ctx.roundRect(pillX, badgeY, pillW, pillH, 2.5);
   ctx.fill();
   ctx.stroke();
 
@@ -325,7 +441,7 @@ export function drawUnitToken(ctx: CanvasRenderingContext2D, opts: UnitTokenOpti
   ctx.font = 'bold 9px ui-monospace, SFMono-Regular, monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(label, cardW / 2 - pillW / 2 + 3.5, cardH / 2 - pillH / 2 + 3.9);
+  ctx.fillText(label, pillX + pillW / 2, badgeY + pillH / 2 + 0.4);
 
   if (landingSecondsLeft !== undefined && landingSecondsLeft > 0) {
     const alertText = `DÉBARQ. ${Math.ceil(landingSecondsLeft)}s`;
@@ -333,13 +449,13 @@ export function drawUnitToken(ctx: CanvasRenderingContext2D, opts: UnitTokenOpti
     ctx.strokeStyle = '#fca5a5';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.roundRect(-36, -cardH / 2 - 18, 72, 13, 2.5);
+    ctx.roundRect(-36, -34, 72, 13, 2.5);
     ctx.fill();
     ctx.stroke();
 
     ctx.fillStyle = '#fef2f2';
     ctx.font = 'bold 8.5px ui-monospace, monospace';
-    ctx.fillText(alertText, 0, -cardH / 2 - 11.2);
+    ctx.fillText(alertText, 0, -27.2);
   }
 
   ctx.restore();

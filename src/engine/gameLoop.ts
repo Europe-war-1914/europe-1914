@@ -42,6 +42,7 @@ export function createNewGame(
     aiDifficulty,
     phase: 'WAR',
     elapsedSeconds: 0,
+    lastMovementTickAt: 0,
     lastAiTickAt: 0,
     lastNeutralGrowthAt: 0,
     playerNationId,
@@ -57,8 +58,6 @@ export function createNewGame(
     tutorialStep: 1,
     eliminationOrder: [],
     winnerId: null,
-    devMode: false,
-    devPauseAi: false,
   };
 
   pushTelegram(
@@ -99,12 +98,18 @@ export function cloneGameState(state: GameState): GameState {
     movingArmies: state.movingArmies.map((a) => ({
       ...a,
       route: [...a.route],
+      path: a.path ? a.path.map(([x, y]) => [x, y] as [number, number]) : undefined,
       startPos: a.startPos ? ([a.startPos[0], a.startPos[1]] as [number, number]) : undefined,
+      clashPos: a.clashPos ? ([a.clashPos[0], a.clashPos[1]] as [number, number]) : undefined,
+      coastBeachPos: a.coastBeachPos
+        ? ([a.coastBeachPos[0], a.coastBeachPos[1]] as [number, number])
+        : undefined,
       detectedBy: a.detectedBy ? [...a.detectedBy] : undefined,
       units: cloneStack(a.units),
     })),
     battles: state.battles.map((b) => ({
       ...b,
+      clashPos: b.clashPos ? ([b.clashPos[0], b.clashPos[1]] as [number, number]) : undefined,
       attackerUnits: cloneStack(b.attackerUnits),
       defenderUnits: cloneStack(b.defenderUnits),
     })),
@@ -174,20 +179,9 @@ export function stepGameState(prevState: GameState, dtRealSeconds: number): Game
 
   tickEconomy(state, dtRealSeconds);
   tickPendingDiplomacy(state);
-  tickMovementsAndCombat(state);
-
+  tickMovementsAndCombat(state, dtRealSeconds);
   if (!state.devPauseAi) {
     tickAI(state);
-  }
-
-  if (state.devMode) {
-    const player = state.nations[state.playerNationId];
-    if (player && !player.isEliminated) {
-      player.resources.gold = 999999;
-      player.resources.steel = 999999;
-      player.resources.gas = 999999;
-      player.techPoints = Math.max(player.techPoints, 9999);
-    }
   }
 
   for (const nationId of PLAYABLE_NATIONS) {

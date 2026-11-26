@@ -18,6 +18,7 @@ export interface UnitTokenOptions {
   isEnemyWarning?: boolean;
   landingSecondsLeft?: number;
   isLandingPhase?: boolean;
+  isBombardingPhase?: boolean;
   timeSec?: number;
   scale?: number;
 }
@@ -367,6 +368,7 @@ export function drawUnitToken(ctx: CanvasRenderingContext2D, opts: UnitTokenOpti
     isEnemyWarning = false,
     landingSecondsLeft,
     isLandingPhase = false,
+    isBombardingPhase = false,
     timeSec = 0,
     scale = 1,
   } = opts;
@@ -445,9 +447,18 @@ export function drawUnitToken(ctx: CanvasRenderingContext2D, opts: UnitTokenOpti
 
   if (landingSecondsLeft !== undefined && landingSecondsLeft > 0) {
     const sec = Math.ceil(landingSecondsLeft);
-    const alertText = isLandingPhase ? `DÉBARQ. ${sec}s` : `ANNEXION ${sec}s`;
-    ctx.fillStyle = isLandingPhase ? 'rgba(127, 29, 29, 0.96)' : 'rgba(120, 53, 15, 0.96)';
-    ctx.strokeStyle = isLandingPhase ? '#fca5a5' : '#fcd34d';
+    const alertText = isLandingPhase
+      ? `DÉBARQ. ${sec}s`
+      : isBombardingPhase
+      ? `TIRS ${sec}s`
+      : `ANNEXION ${sec}s`;
+
+    ctx.fillStyle = isLandingPhase
+      ? 'rgba(127, 29, 29, 0.96)'
+      : isBombardingPhase
+      ? 'rgba(15, 58, 92, 0.96)'
+      : 'rgba(120, 53, 15, 0.96)';
+    ctx.strokeStyle = isLandingPhase ? '#fca5a5' : isBombardingPhase ? '#7dd3fc' : '#fcd34d';
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.roundRect(-40, -34, 80, 13, 2.5);

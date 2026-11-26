@@ -2,7 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Compass, RotateCcw, X } from 'lucide-react';
 import { UNIT_ORDER, UNIT_SPECS } from '../data/balance';
 import { isPointOnLand, MAP_HEIGHT, MAP_WIDTH } from '../data/geo';
-import { findArmyRoute, getMovingArmyWorldPos, totalStack } from '../engine/combat';
+import {
+  findArmyRoute,
+  findRedirectPreview,
+  getMovingArmyWorldPos,
+  totalStack,
+} from '../engine/combat';
 import { getDiplomaticStatus } from '../engine/diplomacy';
 import type { GameState, UnitStack } from '../engine/types';
 import {
@@ -68,7 +73,9 @@ export function MapCanvas({
     () =>
       selectedArmyId
         ? state.movingArmies.find(
-            (a) => a.id === selectedArmyId && (state.devMode || a.owner === state.playerNationId)
+            (a) =>
+              a.id === selectedArmyId &&
+              (state.devMode || a.owner === state.playerNationId)
           ) ?? null
         : null,
     [selectedArmyId, state.movingArmies, state.playerNationId, state.devMode]
@@ -79,7 +86,8 @@ export function MapCanvas({
       redirectingArmyId
         ? state.movingArmies.find(
             (a) =>
-              a.id === redirectingArmyId && (state.devMode || a.owner === state.playerNationId)
+              a.id === redirectingArmyId &&
+              (state.devMode || a.owner === state.playerNationId)
           ) ?? null
         : null,
     [redirectingArmyId, state.movingArmies, state.playerNationId, state.devMode]
@@ -99,10 +107,15 @@ export function MapCanvas({
           startPos,
           route: [],
           isAir: redirectingArmy.isAir,
+          isNaval: redirectingArmy.isNaval,
           isSubmarineMission: redirectingArmy.isSubmarineMission,
           isHostile: false,
         };
       }
+
+      const plan = findRedirectPreview(state, redirectingArmy, hoveredId);
+      if (!plan) return null;
+
       const targetProv = state.provinces[hoveredId];
       const isHostile =
         Boolean(targetProv) &&
@@ -112,9 +125,11 @@ export function MapCanvas({
       return {
         fromId: redirectingArmy.fromProvinceId,
         startPos,
-        route: [hoveredId],
-        isAir: redirectingArmy.isAir,
-        isSubmarineMission: redirectingArmy.isSubmarineMission,
+        route: plan.route,
+        path: plan.path,
+        isAir: plan.isAir,
+        isNaval: plan.isNaval,
+        isSubmarineMission: plan.isSubmarineMission,
         isHostile,
       };
     }
@@ -125,35 +140,32 @@ export function MapCanvas({
         fromId: moveOrderFromId,
         route: [moveOrderFromId],
         isAir: false,
+        isNaval: false,
         isSubmarineMission: false,
         isHostile: false,
       };
     }
 
-    const actingOwner = state.devMode
+    const activeOwner = state.devMode
       ? state.provinces[moveOrderFromId]?.owner ?? state.playerNationId
       : state.playerNationId;
 
-    const found = findArmyRoute(
-      state,
-      actingOwner,
-      moveOrderFromId,
-      hoveredId,
-      moveOrderUnits
-    );
-    if (!found) return null;
+    const plan = findArmyRoute(state, activeOwner, moveOrderFromId, hoveredId, moveOrderUnits);
+    if (!plan) return null;
 
     const targetProv = state.provinces[hoveredId];
     const isHostile =
       Boolean(targetProv) &&
-      targetProv.owner !== actingOwner &&
-      getDiplomaticStatus(state, actingOwner, targetProv.owner) !== 'alliance';
+      targetProv.owner !== activeOwner &&
+      getDiplomaticStatus(state, activeOwner, targetProv.owner) !== 'alliance';
 
     return {
       fromId: moveOrderFromId,
-      route: found.route,
-      isAir: found.isAir,
-      isSubmarineMission: found.isSubmarineMission,
+      route: plan.route,
+      path: plan.path,
+      isAir: plan.isAir,
+      isNaval: plan.isNaval,
+      isSubmarineMission: plan.isSubmarineMission,
       isHostile,
     };
   }, [redirectingArmy, isTargetingMove, moveOrderFromId, moveOrderUnits, hoveredId, state]);

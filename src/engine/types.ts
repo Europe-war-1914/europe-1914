@@ -25,6 +25,8 @@ export type GamePhase = 'LOBBY' | 'MOBILIZATION' | 'WAR' | 'ENDED';
 
 export type TerrainType = 'plains' | 'mountain' | 'urban' | 'coastal';
 
+export type VirtualZone = 'TERRE' | 'MER' | 'AIR';
+
 export type UnitType =
   | 'scout'
   | 'soldier'
@@ -140,13 +142,21 @@ export interface MovingArmy {
   startedAt: number;
   legStartedAt: number;
   legArrivalAt: number;
+  path?: [number, number][];
+  traveledPx?: number;
+  speedPxPerSec?: number;
+  virtualZone?: VirtualZone;
+  coastBeachPos?: [number, number];
   startPos?: [number, number];
   clashPos?: [number, number];
+  inFieldBattleId?: string;
   isNaval: boolean;
   isAir: boolean;
   isSubmarineMission: boolean;
   isLandingPhase?: boolean;
   isOccupationPhase?: boolean;
+  isBombardingPhase?: boolean;
+  bombardLastTickAt?: number;
   landingStartedAt?: number;
   landingEndsAt?: number;
   landingCompleted?: boolean;
@@ -165,6 +175,8 @@ export interface ActiveBattle {
   defenderArmyId?: string;
   clashPos?: [number, number];
   isFieldClash?: boolean;
+  attackerResidualDmg?: number;
+  defenderResidualDmg?: number;
   startedAt: number;
   lastTickAt: number;
   isAirStrike?: boolean;
@@ -214,6 +226,7 @@ export interface GameState {
   aiDifficulty: AiDifficulty;
   phase: GamePhase;
   elapsedSeconds: number;
+  lastMovementTickAt?: number;
   lastAiTickAt: number;
   lastNeutralGrowthAt: number;
   playerNationId: PlayableNationId;

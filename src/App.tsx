@@ -608,11 +608,11 @@ export default function App() {
     soundEngine.playSelect();
   };
 
-  // --- ÉCRAN D'ACCUEIL : SOLO OU MULTIJOUEUR ---
+  // --- ÉCRAN D'ACCUEIL : SOLO OU MULTIJOUEUR (défilement libre sur mobile et desktop) ---
   if (!state) {
     return (
-      <div className="flex min-h-dvh w-full flex-col items-center justify-start sm:justify-center bg-stone-950 p-3 pb-12 sm:p-4 text-amber-50 font-sans overflow-y-auto touch-pan-y">
-        <div className="w-full max-w-4xl rounded-xl border border-stone-700 bg-stone-900/95 p-4 sm:p-6 shadow-2xl">
+      <div className="min-h-dvh w-full overflow-y-auto overscroll-y-contain bg-stone-950 px-3 py-4 pb-20 sm:px-4 sm:py-8 text-amber-50 font-sans touch-pan-y">
+        <div className="mx-auto w-full max-w-4xl rounded-xl border border-stone-700 bg-stone-900/95 p-4 sm:p-6 shadow-2xl">
           {isSupabaseConfigured && (
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-stone-800 bg-stone-950/80 px-3 py-2 text-xs">
               {profile ? (
@@ -1003,7 +1003,6 @@ export default function App() {
         />
       )}
 
-      {/* Modale d'élimination (chute de la capitale) */}
       {isPlayerEliminated && !observerDismissed && (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm font-sans">
           <div className="w-full max-w-md rounded-xl border border-red-500/50 bg-stone-900 p-6 text-center shadow-2xl">
@@ -1057,7 +1056,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Modale de fin de partie (dernier empire survivant) */}
       {state.phase === 'ENDED' && state.winnerId && finalStandings && (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm font-sans">
           <div className="w-full max-w-md rounded-xl border border-amber-400/50 bg-stone-900 p-6 text-center shadow-2xl">

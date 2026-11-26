@@ -267,6 +267,7 @@ export function orderMoveArmy(
     isNaval,
     isAir: found.isAir,
     isSubmarineMission: found.isSubmarineMission,
+    landingCompleted: false,
     detectedBy: [],
     isReturning: false,
   });
@@ -307,6 +308,7 @@ export function orderTurnAround(
 
   army.landingStartedAt = undefined;
   army.landingEndsAt = undefined;
+  army.landingCompleted = false;
 
   const oldFrom = army.fromProvinceId;
   const oldTo = army.toProvinceId;
@@ -393,6 +395,7 @@ export function orderRedirectArmy(
     army.isReturning = target.owner === owner;
     army.landingStartedAt = undefined;
     army.landingEndsAt = undefined;
+    army.landingCompleted = false;
     army.legStartedAt = now;
     army.legArrivalAt = now + dur;
     return { ok: true };
@@ -414,6 +417,7 @@ export function orderRedirectArmy(
     army.isReturning = target.owner === owner;
     army.landingStartedAt = undefined;
     army.landingEndsAt = undefined;
+    army.landingCompleted = false;
     army.legStartedAt = now;
     army.legArrivalAt = now + dur;
     return { ok: true };
@@ -433,6 +437,7 @@ export function orderRedirectArmy(
     army.isReturning = target.owner === owner;
     army.landingStartedAt = undefined;
     army.landingEndsAt = undefined;
+    army.landingCompleted = false;
     army.legStartedAt = now;
     army.legArrivalAt = now + dur;
     return { ok: true };
@@ -511,6 +516,7 @@ export function orderRedirectArmy(
   army.isReturning = target.owner === owner;
   army.landingStartedAt = undefined;
   army.landingEndsAt = undefined;
+  army.landingCompleted = false;
   army.legStartedAt = now;
   army.legArrivalAt = now + dur;
 
@@ -616,11 +622,13 @@ function computeStackPower(
   stack: UnitStack,
   enemyStack: UnitStack,
   province: Province,
-  isDefender: boolean
+  isDefender: boolean,
+  isNavalLanding = false
 ): number {
   const nation = state.nations[owner];
   const terrain = TERRAIN_MODIFIERS[province.terrain];
   const enemyAirCount = enemyStack.bomber + enemyStack.fighter;
+  const navalDefLvl = getEffectiveDefenseLevel(province, 'naval_defense', state.elapsedSeconds);
   let power = 0;
 
   for (const type of UNIT_ORDER) {
@@ -645,6 +653,16 @@ function computeStackPower(
       const defLvl = getEffectiveDefenseLevel(province, spec.counteredBy, state.elapsedSeconds);
       const reduction = DEFENSE_COUNTER_REDUCTION[defLvl] ?? 0;
       unitPower *= 1 - reduction;
+
+      if (
+        isNavalLanding &&
+        spec.category !== 'naval' &&
+        spec.category !== 'aviation' &&
+        navalDefLvl > 0
+      ) {
+        const landingPenalty = Math.min(0.75, navalDefLvl * 0.3);
+        unitPower *= 1 - landingPenalty;
+      }
     }
 
     power += qty * unitPower;
@@ -652,6 +670,35 @@ function computeStackPower(
 
   if (isDefender) {
     power *= terrain.defenseBonus;
+  }
+
+  return power;
+}
+
+function computeFieldClashPower(
+  state: GameState,
+  owner: NationId,
+  stack: UnitStack,
+  enemyStack: UnitStack
+): number {
+  const nation = state.nations[owner];
+  const enemyAirCount = enemyStack.bomber + enemyStack.fighter;
+  let power = 0;
+
+  for (const type of UNIT_ORDER) {
+    const qty = stack[type];
+    if (qty <= 0) continue;
+
+    const spec = UNIT_SPECS[type];
+    let unitPower = (spec.attack + spec.defense) * 0.55;
+    const techLvl = nation ? nation.techLevels[spec.armyTechAxis] ?? 0 : 0;
+    unitPower *= 1 + techLvl * 0.2;
+
+    if (type === 'fighter' && enemyAirCount > 0) {
+      unitPower *= 2.1;
+    }
+
+    power += qty * unitPower;
   }
 
   return power;
@@ -775,9 +822,47 @@ function captureProvince(
   }
 }
 
-function tickNavalInterceptions(state: GameState): void {
+function tickArmyEncountersAndNaval(state: GameState): void {
+  // 1. Accrochages quand deux armées ennemies se croisent en chemin
+  for (let i = 0; i < state.movingArmies.length; i++) {
+    const a = state.movingArmies[i];
+    if (!a || totalStack(a.units) <= 0) continue;
+    const posA = getMovingArmyWorldPos(state, a);
+
+    for (let j = i + 1; j < state.movingArmies.length; j++) {
+      const b = state.movingArmies[j];
+      if (!b || totalStack(b.units) <= 0) continue;
+      if (a.owner === b.owner) continue;
+      if (getDiplomaticStatus(state, a.owner, b.owner) === 'alliance') continue;
+
+      const sameDomain = a.isAir === b.isAir;
+      if (!sameDomain) continue;
+
+      const posB = getMovingArmyWorldPos(state, b);
+      if (Math.hypot(posA[0] - posB[0], posA[1] - posB[1]) > 42) continue;
+
+      setDiplomaticStatus(state, a.owner, b.owner, 'war');
+
+      const powerA = computeFieldClashPower(state, a.owner, a.units, b.units);
+      const powerB = computeFieldClashPower(state, b.owner, b.units, a.units);
+
+      applyDamageToStack(b.units, powerA * (0.9 + Math.random() * 0.25));
+      applyDamageToStack(a.units, powerB * (0.9 + Math.random() * 0.25));
+
+      if (a.owner === state.playerNationId || b.owner === state.playerNationId) {
+        const other = a.owner === state.playerNationId ? b.owner : a.owner;
+        pushTelegram(
+          state,
+          `Escarmouche en route contre ${NATION_TEMPLATES[other].shortName} !`,
+          'warning'
+        );
+      }
+    }
+  }
+
+  // 2. Interceptions navales & tirs côtiers anti-marines
   const navalArmies = state.movingArmies.filter(
-    (a) => (a.isNaval || a.isSubmarineMission) && !a.isAir
+    (a) => (a.isNaval || a.isSubmarineMission) && !a.isAir && totalStack(a.units) > 0
   );
   const movingFrigates = navalArmies.filter((a) => a.units.frigate > 0);
 
@@ -796,6 +881,28 @@ function tickNavalInterceptions(state: GameState): void {
       if (!army.detectedBy) army.detectedBy = [];
       if (!army.detectedBy.includes(targetProv.owner)) {
         army.detectedBy.push(targetProv.owner);
+      }
+    }
+
+    if (
+      !army.isSubmarineMission &&
+      targetProv &&
+      targetProv.owner !== army.owner &&
+      getDiplomaticStatus(state, army.owner, targetProv.owner) !== 'alliance'
+    ) {
+      const coastDefLvl = getEffectiveDefenseLevel(targetProv, 'naval_defense', state.elapsedSeconds);
+      if (
+        coastDefLvl > 0 &&
+        Math.hypot(pos[0] - targetProv.center[0], pos[1] - targetProv.center[1]) < 95
+      ) {
+        const hasNormalUnits =
+          army.units.soldier > 0 ||
+          army.units.scout > 0 ||
+          army.units.light_tank > 0 ||
+          army.units.heavy_tank > 0;
+        if (hasNormalUnits) {
+          applyDamageToStack(army.units, coastDefLvl * 18);
+        }
       }
     }
 
@@ -856,6 +963,7 @@ function autoReturnArmyFromAlly(state: GameState, army: MovingArmy, allyProv: Pr
   army.isSubmarineMission = false;
   army.landingStartedAt = undefined;
   army.landingEndsAt = undefined;
+  army.landingCompleted = false;
   army.isReturning = true;
   army.legStartedAt = state.elapsedSeconds;
   army.legArrivalAt = state.elapsedSeconds + dur;
@@ -872,7 +980,7 @@ function autoReturnArmyFromAlly(state: GameState, army: MovingArmy, allyProv: Pr
 
 export function tickMovementsAndCombat(state: GameState): void {
   if (Math.floor(state.elapsedSeconds) % 3 === 0) {
-    tickNavalInterceptions(state);
+    tickArmyEncountersAndNaval(state);
   }
 
   const stillMoving: MovingArmy[] = [];
@@ -887,6 +995,7 @@ export function tickMovementsAndCombat(state: GameState): void {
       }
       army.landingStartedAt = undefined;
       army.landingEndsAt = undefined;
+      army.landingCompleted = true;
     } else if (state.elapsedSeconds < army.legArrivalAt) {
       stillMoving.push(army);
       continue;
@@ -904,6 +1013,7 @@ export function tickMovementsAndCombat(state: GameState): void {
       const nextProv = state.provinces[army.toProvinceId];
       if (!nextProv) continue;
       army.isNaval = !army.isAir && !arrivedProv.neighbors.includes(army.toProvinceId);
+      army.landingCompleted = false;
       const dur = getLegDurationSeconds(arrivedProv, nextProv, army.units, army.isNaval, army.isAir);
       army.legStartedAt = state.elapsedSeconds;
       army.legArrivalAt = state.elapsedSeconds + dur;
@@ -923,7 +1033,7 @@ export function tickMovementsAndCombat(state: GameState): void {
       continue;
     }
 
-    if (army.isSubmarineMission && army.landingStartedAt === undefined) {
+    if (army.isSubmarineMission && !army.landingCompleted && army.landingStartedAt === undefined) {
       army.landingStartedAt = state.elapsedSeconds;
       army.landingEndsAt = state.elapsedSeconds + GAME_CONFIG.submarineLandingSeconds;
       if (!army.detectedBy) army.detectedBy = [];
@@ -934,7 +1044,7 @@ export function tickMovementsAndCombat(state: GameState): void {
       if (arrivedProv.owner === state.playerNationId || army.owner === state.playerNationId) {
         pushTelegram(
           state,
-          `ALERTE DÉBARQUEMENT (10 s) : sous-marins de ${NATION_TEMPLATES[army.owner].shortName} sur les côtes de ${arrivedProv.name} !`,
+          `ALERTE DÉBARQUEMENT (${GAME_CONFIG.submarineLandingSeconds} s) : sous-marins de ${NATION_TEMPLATES[army.owner].shortName} sur les côtes de ${arrivedProv.name} !`,
           arrivedProv.owner === state.playerNationId ? 'danger' : 'warning',
           arrivedProv.id
         );
@@ -944,6 +1054,8 @@ export function tickMovementsAndCombat(state: GameState): void {
     }
 
     setDiplomaticStatus(state, army.owner, arrivedProv.owner, 'war');
+
+    const isNavalLanding = army.isNaval && !army.isSubmarineMission && !army.isAir;
 
     if (totalStack(arrivedProv.garrison) <= 0) {
       if (army.isAir) {
@@ -961,6 +1073,7 @@ export function tickMovementsAndCombat(state: GameState): void {
     );
     if (existing) {
       addStacks(existing.attackerUnits, army.units);
+      if (isNavalLanding) existing.isNavalStrike = true;
     } else {
       state.battles.push({
         id: createId('bat'),
@@ -972,7 +1085,7 @@ export function tickMovementsAndCombat(state: GameState): void {
         startedAt: state.elapsedSeconds,
         lastTickAt: state.elapsedSeconds,
         isAirStrike: army.isAir,
-        isNavalStrike: army.isNaval,
+        isNavalStrike: isNavalLanding,
       });
 
       if (army.owner === state.playerNationId || arrivedProv.owner === state.playerNationId) {
@@ -1011,7 +1124,8 @@ export function tickMovementsAndCombat(state: GameState): void {
       battle.attackerUnits,
       prov.garrison,
       prov,
-      false
+      false,
+      Boolean(battle.isNavalStrike)
     );
     const defPower = computeStackPower(
       state,
@@ -1019,7 +1133,8 @@ export function tickMovementsAndCombat(state: GameState): void {
       prov.garrison,
       battle.attackerUnits,
       prov,
-      true
+      true,
+      false
     );
 
     applyDamageToStack(prov.garrison, attPower * (0.85 + Math.random() * 0.3));

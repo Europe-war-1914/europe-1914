@@ -12,29 +12,32 @@ export type NationId =
 export type PlayableNationId = Exclude<NationId, 'neutral'>;
 
 export type GameMode = 'blitz' | 'campaign';
-export type AiDifficulty = 'standard' | 'hard';
+
+export type AiDifficulty = 'standard' | 'hardcore';
+
+export interface MatchSettings {
+  mode: GameMode;
+  fogOfWar: boolean;
+  aiDifficulty: AiDifficulty;
+}
+
 export type GamePhase = 'LOBBY' | 'MOBILIZATION' | 'WAR' | 'ENDED';
 
 export type TerrainType = 'plains' | 'mountain' | 'urban' | 'coastal';
 
-export type ResourceType = 'gold' | 'steel' | 'gas' | 'techPoints';
-export type ExtractionResource = 'gas' | 'steel' | 'gold';
-
 export type UnitType =
-  | 'light_tank'
-  | 'heavy_tank'
   | 'scout'
   | 'soldier'
-  | 'bomber'
+  | 'light_tank'
+  | 'heavy_tank'
   | 'fighter'
+  | 'bomber'
   | 'submarine'
   | 'frigate';
 
 export type DefenseType = 'trenches' | 'aa_defense' | 'bunkers' | 'naval_defense';
 
-export type DiplomaticStatus = 'war' | 'neutral' | 'alliance';
-
-export type AiPersonality = 'expansionist' | 'fortress' | 'opportunist' | 'diplomat';
+export type ExtractionResource = 'gas' | 'steel' | 'gold';
 
 export type TechBranch = 'defense' | 'army' | 'resources';
 
@@ -51,6 +54,10 @@ export type TechAxis =
   | 'steel_extraction'
   | 'gold_extraction'
   | 'worker_speed';
+
+export type DiplomaticStatus = 'war' | 'neutral' | 'nap' | 'alliance';
+
+export type AiPersonality = 'expansionist' | 'fortress' | 'opportunist' | 'diplomat';
 
 export interface ResourcePool {
   gold: number;
@@ -74,21 +81,42 @@ export interface DefenseWeakness {
   expiresAt: number;
 }
 
+export interface ConstructionOrder {
+  id: string;
+  owner: NationId;
+  provinceId: string;
+  kind: 'barracks' | 'laboratory' | 'extraction' | 'defense';
+  resource?: ExtractionResource;
+  defense?: DefenseType;
+  startedAt: number;
+  endsAt: number;
+}
+
+export interface RecruitmentOrder {
+  id: string;
+  owner: NationId;
+  provinceId: string;
+  unit: UnitType;
+  count: number;
+  startedAt: number;
+  endsAt: number;
+}
+
 export interface Province {
   id: string;
   name: string;
   owner: NationId;
   isCapital: boolean;
-  terrain: TerrainType;
   victoryPoints: number;
+  terrain: TerrainType;
   center: [number, number];
   polygon: [number, number][];
   neighbors: string[];
   seaNeighbors: string[];
   baseIncome: ResourcePool;
+  barracksLevel: number;
   hasLaboratory: boolean;
   laboratoryLevel: number;
-  barracksLevel: number;
   extractionFactories: Record<ExtractionResource, number>;
   defenses: Record<DefenseType, number>;
   activeWeaknesses: DefenseWeakness[];
@@ -104,18 +132,19 @@ export interface MovingArmy {
   targetProvinceId: string;
   route: string[];
   currentLegIndex: number;
-  startPos?: [number, number];
   units: UnitStack;
   startedAt: number;
   legStartedAt: number;
   legArrivalAt: number;
+  startPos?: [number, number];
   isNaval: boolean;
   isAir: boolean;
   isSubmarineMission: boolean;
   landingStartedAt?: number;
   landingEndsAt?: number;
+  landingCompleted?: boolean;
   detectedBy?: NationId[];
-  isReturning: boolean;
+  isReturning?: boolean;
 }
 
 export interface ActiveBattle {
@@ -131,53 +160,29 @@ export interface ActiveBattle {
   isNavalStrike?: boolean;
 }
 
-export interface ConstructionOrder {
-  id: string;
-  owner: NationId;
-  provinceId: string;
-  kind: 'laboratory' | 'barracks' | 'extraction' | 'defense';
-  targetKey: string;
-  targetLevel: number;
-  startedAt: number;
-  endsAt: number;
-}
-
-export interface RecruitmentOrder {
-  id: string;
-  owner: NationId;
-  provinceId: string;
-  unit: UnitType;
-  count: number;
-  startedAt: number;
-  endsAt: number;
-}
-
 export interface Nation {
   id: NationId;
   name: string;
   shortName: string;
   color: string;
   borderColor: string;
+  lore: string;
   isPlayer: boolean;
   personality: AiPersonality;
-  capitalProvinceId?: string;
   resources: ResourcePool;
   techPoints: number;
   techLevels: Record<TechAxis, number>;
-  activeAllianceWith: PlayableNationId | null;
   isEliminated: boolean;
-  lastAttackAt?: number;
+  capitalProvinceId?: string;
 }
 
 export interface DiplomaticOffer {
   id: string;
   from: PlayableNationId;
   to: PlayableNationId;
-  type: 'alliance' | 'peace';
-  goldEscrow?: number;
+  type: 'nap' | 'alliance' | 'peace';
   createdAt: number;
   expiresAt: number;
-  aiDecisionAt?: number;
 }
 
 export interface TelegramMessage {
@@ -186,12 +191,6 @@ export interface TelegramMessage {
   text: string;
   level: 'info' | 'warning' | 'danger' | 'diplomacy';
   provinceId?: string;
-}
-
-export interface MatchSettings {
-  mode: GameMode;
-  fogOfWar: boolean;
-  aiDifficulty: AiDifficulty;
 }
 
 export interface GameState {

@@ -36,7 +36,7 @@ export const GAME_MODES: Record<GameMode, GameModeSpec> = {
 export const GAME_CONFIG = {
   combatTickSeconds: 3,
   defenseWeaknessDurationSeconds: 120,
-  submarineLandingSeconds: 10,
+  submarineLandingSeconds: 5,
   capitalCaptureTechBonus: 240,
   capitalCaptureTechStealRatio: 0.35,
   allianceCostGold: 250,
@@ -206,7 +206,7 @@ export const UNIT_SPECS: Record<UnitType, UnitSpec> = {
     armyTechAxis: 'naval',
     counteredBy: 'naval_defense',
     description:
-      'Portée côtière libre, invisible hors défenses marines ou frégates. Débarquement annoncé (10 s).',
+      'Portée côtière libre, invisible hors défenses marines ou frégates. Débarquement annoncé (5 s).',
     cost: { gold: 185, steel: 90, gas: 45 },
     trainSeconds: 25,
     attack: 21,

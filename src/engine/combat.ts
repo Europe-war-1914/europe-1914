@@ -715,7 +715,7 @@ function applyDamageToStack(stack: UnitStack, damage: number): void {
     if (kills > 0) {
       stack[type] -= kills;
       remaining -= kills * unitHp;
-    } else if (remaining >= unitHp * 0.4 && Math.random() < remaining / unitHp) {
+    } else if (remaining >= unitHp * 0.45 && Math.random() < remaining / unitHp) {
       stack[type] -= 1;
       remaining = 0;
     }
@@ -823,7 +823,6 @@ function captureProvince(
 }
 
 function tickArmyEncountersAndNaval(state: GameState): void {
-  // 1. Accrochages quand deux armées ennemies se croisent en chemin
   for (let i = 0; i < state.movingArmies.length; i++) {
     const a = state.movingArmies[i];
     if (!a || totalStack(a.units) <= 0) continue;
@@ -860,7 +859,6 @@ function tickArmyEncountersAndNaval(state: GameState): void {
     }
   }
 
-  // 2. Interceptions navales & tirs côtiers anti-marines
   const navalArmies = state.movingArmies.filter(
     (a) => (a.isNaval || a.isSubmarineMission) && !a.isAir && totalStack(a.units) > 0
   );
@@ -1063,7 +1061,22 @@ export function tickMovementsAndCombat(state: GameState): void {
         autoReturnArmyFromAlly(state, army, arrivedProv);
         stillMoving.push(army);
       } else {
-        captureProvince(state, arrivedProv, army.owner, army.units);
+        // Délai d'annexion de 10 s lorsqu'il n'y a plus aucune unité dans la province
+        if (army.landingStartedAt === undefined) {
+          army.landingStartedAt = state.elapsedSeconds;
+          army.landingEndsAt = state.elapsedSeconds + GAME_CONFIG.occupationDurationSeconds;
+          if (arrivedProv.owner === state.playerNationId || army.owner === state.playerNationId) {
+            pushTelegram(
+              state,
+              `Annexion de ${arrivedProv.name} en cours (${GAME_CONFIG.occupationDurationSeconds} s)...`,
+              arrivedProv.owner === state.playerNationId ? 'warning' : 'info',
+              arrivedProv.id
+            );
+          }
+          stillMoving.push(army);
+        } else {
+          captureProvince(state, arrivedProv, army.owner, army.units);
+        }
       }
       continue;
     }

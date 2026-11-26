@@ -37,6 +37,7 @@ export const GAME_CONFIG = {
   combatTickSeconds: 3,
   defenseWeaknessDurationSeconds: 120,
   submarineLandingSeconds: 5,
+  occupationDurationSeconds: 10,
   capitalCaptureTechBonus: 240,
   capitalCaptureTechStealRatio: 0.35,
   allianceCostGold: 250,

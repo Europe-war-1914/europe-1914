@@ -608,193 +608,195 @@ export default function App() {
     soundEngine.playSelect();
   };
 
-  // --- ÉCRAN D'ACCUEIL : SOLO OU MULTIJOUEUR (défilement libre sur mobile et desktop) ---
+  // --- ÉCRAN D'ACCUEIL : SOLO OU MULTIJOUEUR ---
   if (!state) {
     return (
-      <div className="min-h-dvh w-full overflow-y-auto overscroll-y-contain bg-stone-950 px-3 py-4 pb-20 sm:px-4 sm:py-8 text-amber-50 font-sans touch-pan-y">
-        <div className="mx-auto w-full max-w-4xl rounded-xl border border-stone-700 bg-stone-900/95 p-4 sm:p-6 shadow-2xl">
-          {isSupabaseConfigured && (
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-stone-800 bg-stone-950/80 px-3 py-2 text-xs">
-              {profile ? (
-                <>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="flex items-center gap-1.5 font-semibold text-amber-100">
-                      <User className="h-3.5 w-3.5 text-amber-400" />
-                      {profile.username}
-                    </span>
-                    <span className="rounded border border-stone-700 bg-stone-900 px-2 py-0.5 font-mono text-[11px] text-amber-300">
-                      {profile.elo} ELO
-                    </span>
-                    {profile.is_commander && (
-                      <span className="flex items-center gap-1 rounded border border-amber-400/50 bg-amber-950/70 px-2 py-0.5 text-[11px] font-bold text-amber-300">
-                        <Crown className="h-3 w-3" />
-                        Commandant
+      <div className="h-dvh w-full overflow-y-auto overscroll-y-contain touch-pan-y bg-stone-950 px-3 py-4 pb-20 sm:p-6 text-amber-50 font-sans">
+        <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col justify-start sm:justify-center">
+          <div className="w-full rounded-xl border border-stone-700 bg-stone-900/95 p-4 sm:p-6 shadow-2xl">
+            {isSupabaseConfigured && (
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-stone-800 bg-stone-950/80 px-3 py-2 text-xs">
+                {profile ? (
+                  <>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="flex items-center gap-1.5 font-semibold text-amber-100">
+                        <User className="h-3.5 w-3.5 text-amber-400" />
+                        {profile.username}
                       </span>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setLeaderboardOpen(true)}
-                      className="flex items-center gap-1.5 rounded border border-stone-700 bg-stone-900 px-2.5 py-1 font-semibold text-amber-100 hover:bg-stone-800"
-                    >
-                      <Trophy className="h-3.5 w-3.5 text-amber-400" />
-                      Classement
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShopModalOpen(true)}
-                      className="flex items-center gap-1.5 rounded border border-amber-400/50 bg-amber-950/70 px-2.5 py-1 font-semibold text-amber-200 hover:bg-amber-900/70"
-                    >
-                      <Crown className="h-3.5 w-3.5 text-amber-400" />
-                      Boutique
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleLogout}
-                      className="flex items-center gap-1 rounded border border-stone-700 bg-stone-900 px-2.5 py-1 text-stone-300 hover:bg-stone-800 hover:text-white"
-                    >
-                      <LogOut className="h-3.5 w-3.5" />
-                      Déconnexion
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <span className="text-stone-400">
-                    Mode Invité — connectez-vous pour sauvegarder votre ELO et vos packs.
-                  </span>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setLeaderboardOpen(true)}
-                      className="flex items-center gap-1.5 rounded border border-stone-700 bg-stone-900 px-2.5 py-1 font-semibold text-amber-100 hover:bg-stone-800"
-                    >
-                      <Trophy className="h-3.5 w-3.5 text-amber-400" />
-                      Classement
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShopModalOpen(true)}
-                      className="flex items-center gap-1.5 rounded border border-amber-400/50 bg-amber-950/70 px-2.5 py-1 font-semibold text-amber-200 hover:bg-amber-900/70"
-                    >
-                      <Crown className="h-3.5 w-3.5 text-amber-400" />
-                      Boutique
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setAuthModalOpen(true)}
-                      className="flex items-center gap-1.5 rounded bg-amber-600 px-3 py-1 font-bold text-stone-950 hover:bg-amber-500"
-                    >
-                      <LogIn className="h-3.5 w-3.5" />
-                      Connexion / Inscription
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          <div className="text-center">
-            <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-amber-400/85">
-              Grande Stratégie • Guerre Totale • 65 Provinces
-            </p>
-            <h1 className="mt-1 font-serif text-2xl sm:text-4xl font-bold text-amber-100">
-              1914 : L’Europe en Flammes
-            </h1>
-            <p className="mt-1.5 text-xs sm:text-sm text-stone-400">
-              Arbre technologique instantané • 8 unités & contres tactiques • Annexion à la chute
-              d’une capitale
-            </p>
-          </div>
-
-          <div className="mt-5 grid grid-cols-2 gap-2 rounded-lg border border-stone-800 bg-stone-950/70 p-1">
-            <button
-              type="button"
-              onClick={() => setLobbyTab('solo')}
-              className={`rounded-md py-2 text-xs sm:text-sm font-bold transition ${
-                lobbyTab === 'solo'
-                  ? 'bg-amber-600 text-stone-950'
-                  : 'text-stone-300 hover:text-amber-100'
-              }`}
-            >
-              Campagne Solo (vs 7 IA)
-            </button>
-            <button
-              type="button"
-              onClick={() => setLobbyTab('online')}
-              className={`flex items-center justify-center gap-1.5 rounded-md py-2 text-xs sm:text-sm font-bold transition ${
-                lobbyTab === 'online'
-                  ? 'bg-amber-600 text-stone-950'
-                  : 'text-stone-300 hover:text-amber-100'
-              }`}
-            >
-              <Users className="h-4 w-4" />
-              Multijoueur en ligne
-            </button>
-          </div>
-
-          {lobbyTab === 'solo' ? (
-            <div className="mt-5 space-y-5">
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-2.5">
-                {PLAYABLE_NATIONS.map((id) => {
-                  const tpl = NATION_TEMPLATES[id];
-                  const active = chosenNation === id;
-                  return (
-                    <button
-                      type="button"
-                      key={id}
-                      onClick={() => setChosenNation(id)}
-                      className={`rounded-lg border p-3 text-left transition ${
-                        active
-                          ? 'border-amber-400 bg-stone-800 ring-1 ring-amber-400/60'
-                          : 'border-stone-800 bg-stone-950/70 hover:border-stone-600'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span
-                          className="h-3 w-3 shrink-0 rounded-full border border-white/40"
-                          style={{ backgroundColor: tpl.color }}
-                        />
-                        <span className="font-serif text-xs sm:text-sm font-bold text-amber-100">
-                          {tpl.shortName}
+                      <span className="rounded border border-stone-700 bg-stone-900 px-2 py-0.5 font-mono text-[11px] text-amber-300">
+                        {profile.elo} ELO
+                      </span>
+                      {profile.is_commander && (
+                        <span className="flex items-center gap-1 rounded border border-amber-400/50 bg-amber-950/70 px-2 py-0.5 text-[11px] font-bold text-amber-300">
+                          <Crown className="h-3 w-3" />
+                          Commandant
                         </span>
-                      </div>
-                      <p className="mt-1.5 text-[11px] leading-snug text-stone-400">{tpl.lore}</p>
-                    </button>
-                  );
-                })}
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setLeaderboardOpen(true)}
+                        className="flex items-center gap-1.5 rounded border border-stone-700 bg-stone-900 px-2.5 py-1 font-semibold text-amber-100 hover:bg-stone-800"
+                      >
+                        <Trophy className="h-3.5 w-3.5 text-amber-400" />
+                        Classement
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShopModalOpen(true)}
+                        className="flex items-center gap-1.5 rounded border border-amber-400/50 bg-amber-950/70 px-2.5 py-1 font-semibold text-amber-200 hover:bg-amber-900/70"
+                      >
+                        <Crown className="h-3.5 w-3.5 text-amber-400" />
+                        Boutique
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleLogout}
+                        className="flex items-center gap-1 rounded border border-stone-700 bg-stone-900 px-2.5 py-1 text-stone-300 hover:bg-stone-800 hover:text-white"
+                      >
+                        <LogOut className="h-3.5 w-3.5" />
+                        Déconnexion
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-stone-400">
+                      Mode Invité — connectez-vous pour sauvegarder votre ELO et vos packs.
+                    </span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setLeaderboardOpen(true)}
+                        className="flex items-center gap-1.5 rounded border border-stone-700 bg-stone-900 px-2.5 py-1 font-semibold text-amber-100 hover:bg-stone-800"
+                      >
+                        <Trophy className="h-3.5 w-3.5 text-amber-400" />
+                        Classement
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShopModalOpen(true)}
+                        className="flex items-center gap-1.5 rounded border border-amber-400/50 bg-amber-950/70 px-2.5 py-1 font-semibold text-amber-200 hover:bg-amber-900/70"
+                      >
+                        <Crown className="h-3.5 w-3.5 text-amber-400" />
+                        Boutique
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAuthModalOpen(true)}
+                        className="flex items-center gap-1.5 rounded bg-amber-600 px-3 py-1 font-bold text-stone-950 hover:bg-amber-500"
+                      >
+                        <LogIn className="h-3.5 w-3.5" />
+                        Connexion / Inscription
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
+            )}
 
-              <div className="flex justify-center">
-                <button
-                  type="button"
-                  onClick={() => startSoloMatch(chosenNation)}
-                  className="w-full sm:w-auto rounded-lg bg-amber-600 px-10 py-3 font-serif text-base font-bold text-stone-950 shadow-lg transition hover:bg-amber-500"
-                >
-                  Entrer en guerre — {NATION_TEMPLATES[chosenNation].shortName}
-                </button>
-              </div>
+            <div className="text-center">
+              <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-amber-400/85">
+                Grande Stratégie • Guerre Totale • 65 Provinces
+              </p>
+              <h1 className="mt-1 font-serif text-2xl sm:text-4xl font-bold text-amber-100">
+                1914 : L’Europe en Flammes
+              </h1>
+              <p className="mt-1.5 text-xs sm:text-sm text-stone-400">
+                Arbre technologique instantané • 8 unités & contres tactiques • Annexion à la chute
+                d’une capitale
+              </p>
             </div>
-          ) : (
-            <OnlineLobby
-              connected={connected}
-              serverUrl={SERVER_URL}
-              mySocketId={mySocketId}
-              room={room}
-              chatMessages={chatMessages}
-              error={onlineError}
-              defaultPlayerName={profile?.username}
-              onRetryConnection={() => setSocketNonce((n) => n + 1)}
-              onQuickPlay={handleQuickPlay}
-              onCreateRoom={handleCreateRoom}
-              onJoinRoom={handleJoinRoom}
-              onSelectNation={handleSelectOnlineNation}
-              onSendChat={handleSendChat}
-              onStartRoom={handleStartRoom}
-              onLeaveRoom={handleLeaveRoom}
-            />
-          )}
+
+            <div className="mt-5 grid grid-cols-2 gap-2 rounded-lg border border-stone-800 bg-stone-950/70 p-1">
+              <button
+                type="button"
+                onClick={() => setLobbyTab('solo')}
+                className={`rounded-md py-2 text-xs sm:text-sm font-bold transition ${
+                  lobbyTab === 'solo'
+                    ? 'bg-amber-600 text-stone-950'
+                    : 'text-stone-300 hover:text-amber-100'
+                }`}
+              >
+                Campagne Solo (vs 7 IA)
+              </button>
+              <button
+                type="button"
+                onClick={() => setLobbyTab('online')}
+                className={`flex items-center justify-center gap-1.5 rounded-md py-2 text-xs sm:text-sm font-bold transition ${
+                  lobbyTab === 'online'
+                    ? 'bg-amber-600 text-stone-950'
+                    : 'text-stone-300 hover:text-amber-100'
+                }`}
+              >
+                <Users className="h-4 w-4" />
+                Multijoueur en ligne
+              </button>
+            </div>
+
+            {lobbyTab === 'solo' ? (
+              <div className="mt-5 space-y-5">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-2.5">
+                  {PLAYABLE_NATIONS.map((id) => {
+                    const tpl = NATION_TEMPLATES[id];
+                    const active = chosenNation === id;
+                    return (
+                      <button
+                        type="button"
+                        key={id}
+                        onClick={() => setChosenNation(id)}
+                        className={`rounded-lg border p-3 text-left transition ${
+                          active
+                            ? 'border-amber-400 bg-stone-800 ring-1 ring-amber-400/60'
+                            : 'border-stone-800 bg-stone-950/70 hover:border-stone-600'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="h-3 w-3 shrink-0 rounded-full border border-white/40"
+                            style={{ backgroundColor: tpl.color }}
+                          />
+                          <span className="font-serif text-xs sm:text-sm font-bold text-amber-100">
+                            {tpl.shortName}
+                          </span>
+                        </div>
+                        <p className="mt-1.5 text-[11px] leading-snug text-stone-400">{tpl.lore}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() => startSoloMatch(chosenNation)}
+                    className="w-full sm:w-auto rounded-lg bg-amber-600 px-10 py-3 font-serif text-base font-bold text-stone-950 shadow-lg transition hover:bg-amber-500"
+                  >
+                    Entrer en guerre — {NATION_TEMPLATES[chosenNation].shortName}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <OnlineLobby
+                connected={connected}
+                serverUrl={SERVER_URL}
+                mySocketId={mySocketId}
+                room={room}
+                chatMessages={chatMessages}
+                error={onlineError}
+                defaultPlayerName={profile?.username}
+                onRetryConnection={() => setSocketNonce((n) => n + 1)}
+                onQuickPlay={handleQuickPlay}
+                onCreateRoom={handleCreateRoom}
+                onJoinRoom={handleJoinRoom}
+                onSelectNation={handleSelectOnlineNation}
+                onSendChat={handleSendChat}
+                onStartRoom={handleStartRoom}
+                onLeaveRoom={handleLeaveRoom}
+              />
+            )}
+          </div>
         </div>
 
         {authModalOpen && (

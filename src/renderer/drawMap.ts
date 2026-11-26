@@ -1,6 +1,6 @@
-import { getEuropeLandPath, MAP_HEIGHT, MAP_WIDTH, projectGeo } from '../data/geo';
+import { getEuropeLandPath, isPointOnLand, MAP_HEIGHT, MAP_WIDTH, projectGeo } from '../data/geo';
 import { NATION_TEMPLATES } from '../data/nations';
-import { getMovingArmyWorldPos, totalStack } from '../engine/combat';
+import { getCoastalLandingPos, getMovingArmyWorldPos, totalStack } from '../engine/combat';
 import { getDiplomaticStatus } from '../engine/diplomacy';
 import { hasIntelOnProvince, isMovingArmyVisibleTo } from '../engine/visibility';
 import type { DefenseType, GameState, MovingArmy, Province } from '../engine/types';
@@ -31,6 +31,166 @@ type CachedDefenseSprite = {
 };
 
 const defenseSpriteCache: Partial<Record<DefenseType, CachedDefenseSprite | 'failed'>> = {};
+
+let cachedSeaNodes: [number, number][] | null = null;
+
+/** Génère un réseau de points de navigation situés en mer, à distance des côtes (~32 px) */
+function getSeaNavigationNodes(): [number, number][] {
+  if (cachedSeaNodes) return cachedSeaNodes;
+
+  const nodes: [number, number][] = [];
+  const step = 64;
+  const coastClearance = 28; // ~ taille d'un soldat / pion entre la côte et le bateau
+
+  for (let y = 90; y <= MAP_HEIGHT - 90; y += step) {
+    for (let x = 90; x <= MAP_WIDTH - 90; x += step) {
+      if (isPointOnLand(x, y)) continue;
+
+      let nearCoast = false;
+      for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 4) {
+        const checkX = x + Math.cos(angle) * coastClearance;
+        const checkY = y + Math.sin(angle) * coastClearance;
+        if (isPointOnLand(checkX, checkY)) {
+          nearCoast = true;
+          break;
+        }
+      }
+
+      if (!nearCoast) {
+        nodes.push([x, y]);
+      }
+    }
+  }
+
+  cachedSeaNodes = nodes;
+  return nodes;
+}
+
+/** Vérifie qu'un segment entre deux points reste entièrement en mer et à distance des côtes */
+function isSegmentClearAtSea(a: [number, number], b: [number, number]): boolean {
+  const dist = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  const steps = Math.max(4, Math.ceil(dist / 16));
+  const clearance = 26;
+
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
+    const px = a[0] + (b[0] - a[0]) * t;
+    const py = a[1] + (b[1] - a[1]) * t;
+    if (isPointOnLand(px, py)) return false;
+
+    for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 2) {
+      if (isPointOnLand(px + Math.cos(angle) * clearance, py + Math.sin(angle) * clearance)) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+/** Trouve le point en mer le plus proche d'une position donnée */
+function findNearestSeaNode(pt: [number, number], nodes: [number, number][]): [number, number] | null {
+  let best: [number, number] | null = null;
+  let bestDist = Infinity;
+  for (const n of nodes) {
+    const d = Math.hypot(n[0] - pt[0], n[1] - pt[1]);
+    if (d < bestDist) {
+      bestDist = d;
+      best = n;
+    }
+  }
+  return best;
+}
+
+/** Calcule un chemin maritime contournant les terres au large des côtes */
+export function computeSeaPolyline(
+  startPt: [number, number],
+  endPt: [number, number]
+): [number, number][] {
+  if (isSegmentClearAtSea(startPt, endPt)) {
+    return [startPt, endPt];
+  }
+
+  const nodes = getSeaNavigationNodes();
+  if (nodes.length === 0) return [startPt, endPt];
+
+  const startNode = findNearestSeaNode(startPt, nodes);
+  const goalNode = findNearestSeaNode(endPt, nodes);
+  if (!startNode || !goalNode) return [startPt, endPt];
+
+  const keyOf = (n: [number, number]) => `${Math.round(n[0])},${Math.round(n[1])}`;
+  const startKey = keyOf(startNode);
+  const goalKey = keyOf(goalNode);
+
+  const dist = new Map<string, number>();
+  const prev = new Map<string, [number, number]>();
+  const nodeByKey = new Map<string, [number, number]>();
+  const visited = new Set<string>();
+  const open: [number, number][] = [startNode];
+
+  dist.set(startKey, 0);
+  nodeByKey.set(startKey, startNode);
+
+  let iterations = 0;
+  while (open.length > 0 && iterations < 1800) {
+    iterations++;
+    open.sort((a, b) => (dist.get(keyOf(a)) ?? Infinity) - (dist.get(keyOf(b)) ?? Infinity));
+    const curr = open.shift()!;
+    const currKey = keyOf(curr);
+    if (visited.has(currKey)) continue;
+    visited.add(currKey);
+
+    if (currKey === goalKey) break;
+
+    const baseCost = dist.get(currKey) ?? Infinity;
+
+    for (const nb of nodes) {
+      const d = Math.hypot(nb[0] - curr[0], nb[1] - curr[1]);
+      if (d === 0 || d > 145) continue;
+      const nbKey = keyOf(nb);
+      if (visited.has(nbKey)) continue;
+      if (!isSegmentClearAtSea(curr, nb)) continue;
+
+      // Léger biais vers la cible pour éviter d'explorer toute la carte
+      const heuristicBias = Math.hypot(nb[0] - goalNode[0], nb[1] - goalNode[1]) * 0.25;
+      const candidateCost = baseCost + d + heuristicBias;
+
+      if (candidateCost < (dist.get(nbKey) ?? Infinity)) {
+        dist.set(nbKey, candidateCost);
+        prev.set(nbKey, curr);
+        nodeByKey.set(nbKey, nb);
+        open.push(nb);
+      }
+    }
+  }
+
+  if (!dist.has(goalKey)) {
+    return [startPt, endPt];
+  }
+
+  const seaChain: [number, number][] = [];
+  let cursor: [number, number] | undefined = goalNode;
+  while (cursor) {
+    seaChain.unshift(cursor);
+    const k = keyOf(cursor);
+    if (k === startKey) break;
+    cursor = prev.get(k);
+  }
+
+  const full: [number, number][] = [startPt];
+  for (const pt of seaChain) {
+    const last = full[full.length - 1];
+    if (Math.hypot(pt[0] - last[0], pt[1] - last[1]) > 8) {
+      full.push(pt);
+    }
+  }
+  const lastPt = full[full.length - 1];
+  if (Math.hypot(endPt[0] - lastPt[0], endPt[1] - lastPt[1]) > 4) {
+    full.push(endPt);
+  }
+
+  return full;
+}
 
 function buildCutoutDefenseSprite(img: HTMLImageElement): HTMLCanvasElement | HTMLImageElement {
   try {
@@ -699,47 +859,48 @@ export function drawMap(
   }
   ctx.restore();
 
-  // Aperçu suivant l'itinéraire calculé (côtes/mer ou terre)
+  // Aperçu de trajectoire (en mer au large des côtes si mission navale / sous-marine)
   if (
     movePreview &&
     (movePreview.route.length >= 2 || (movePreview.startPos && movePreview.route.length >= 1))
   ) {
-    ctx.save();
-    ctx.strokeStyle = movePreview.isSubmarineMission
-      ? '#38bdf8'
-      : movePreview.isAir
-      ? '#f59e0b'
-      : movePreview.isHostile
-      ? '#ef4444'
-      : '#4ade80';
-    ctx.lineWidth = 3;
-    ctx.setLineDash([8, 5]);
-    ctx.lineDashOffset = -timeSec * 28;
-    ctx.beginPath();
-    if (movePreview.startPos) {
-      ctx.moveTo(movePreview.startPos[0], movePreview.startPos[1]);
-      movePreview.route.forEach((pId) => {
-        const p = state.provinces[pId];
-        if (p) ctx.lineTo(p.center[0], p.center[1]);
-      });
-    } else {
-      movePreview.route.forEach((pId, idx) => {
-        const p = state.provinces[pId];
-        if (!p) return;
-        if (idx === 0) ctx.moveTo(p.center[0], p.center[1]);
-        else ctx.lineTo(p.center[0], p.center[1]);
-      });
-    }
-    ctx.stroke();
+    const originProv = state.provinces[movePreview.fromId];
+    const destProv = state.provinces[movePreview.route[movePreview.route.length - 1]];
+    const startPt = movePreview.startPos ?? originProv?.center;
 
-    const dest = state.provinces[movePreview.route[movePreview.route.length - 1]];
-    if (dest) {
+    if (startPt && destProv) {
+      const endPt = movePreview.isSubmarineMission
+        ? getCoastalLandingPos(destProv, startPt)
+        : destProv.center;
+      const points =
+        movePreview.isSubmarineMission && !movePreview.isAir
+          ? computeSeaPolyline(startPt, endPt)
+          : [startPt, endPt];
+
+      ctx.save();
+      ctx.strokeStyle = movePreview.isSubmarineMission
+        ? '#38bdf8'
+        : movePreview.isAir
+        ? '#f59e0b'
+        : movePreview.isHostile
+        ? '#ef4444'
+        : '#4ade80';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([8, 5]);
+      ctx.lineDashOffset = -timeSec * 28;
+      ctx.beginPath();
+      points.forEach((pt, idx) => {
+        if (idx === 0) ctx.moveTo(pt[0], pt[1]);
+        else ctx.lineTo(pt[0], pt[1]);
+      });
+      ctx.stroke();
+
       ctx.setLineDash([]);
       ctx.beginPath();
-      ctx.arc(dest.center[0], dest.center[1], 18, 0, Math.PI * 2);
+      ctx.arc(endPt[0], endPt[1], 18, 0, Math.PI * 2);
       ctx.stroke();
+      ctx.restore();
     }
-    ctx.restore();
   }
 
   for (const prov of provinces) {
@@ -776,19 +937,30 @@ export function drawMap(
     }
   }
 
-  // Trajectoires étape par étape (longeant les côtes / étapes de route) & pions des armées
+  // Trajectoires & pions des armées en mouvement
   for (const army of state.movingArmies) {
     if (!isMovingArmyVisibleTo(state, army, state.playerNationId)) continue;
 
     const from = state.provinces[army.fromProvinceId];
     const to = state.provinces[army.toProvinceId];
-    if (!to) continue;
+    const finalDest = state.provinces[army.targetProvinceId] ?? to;
+    if (!to || !finalDest) continue;
 
     const [ax, ay] = getMovingArmyWorldPos(state, army);
     const startX = army.startPos ? army.startPos[0] : from?.center[0] ?? ax;
     const isMine = army.owner === state.playerNationId;
     const isEnemy =
       !isMine && getDiplomaticStatus(state, state.playerNationId, army.owner) !== 'alliance';
+
+    const endPt =
+      army.isSubmarineMission && !army.landingCompleted
+        ? getCoastalLandingPos(finalDest, [ax, ay])
+        : finalDest.center;
+
+    const linePts =
+      (army.isNaval || army.isSubmarineMission) && !army.isAir
+        ? computeSeaPolyline([ax, ay], endPt)
+        : [[ax, ay] as [number, number], endPt];
 
     ctx.save();
     ctx.strokeStyle =
@@ -804,11 +976,10 @@ export function drawMap(
     ctx.lineWidth = army.id === selectedArmyId ? 2.8 : 2.1;
     ctx.setLineDash(army.isAir ? [3, 4] : [6, 4]);
     ctx.beginPath();
-    ctx.moveTo(ax, ay);
-    for (let i = army.currentLegIndex + 1; i < army.route.length; i++) {
-      const wp = state.provinces[army.route[i]];
-      if (wp) ctx.lineTo(wp.center[0], wp.center[1]);
-    }
+    linePts.forEach((pt, idx) => {
+      if (idx === 0) ctx.moveTo(pt[0], pt[1]);
+      else ctx.lineTo(pt[0], pt[1]);
+    });
     ctx.stroke();
     ctx.restore();
 

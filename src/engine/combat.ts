@@ -65,7 +65,7 @@ function distBetween(a: Province, b: Province): number {
   return Math.hypot(a.center[0] - b.center[0], a.center[1] - b.center[1]);
 }
 
-/** Calcule un point situé sur la côte de la province cible (vers le bord du polygone / côté mer) */
+/** Calcule un point sur le littoral de la province cible pour l'arrêt et le débarquement */
 export function getCoastalLandingPos(
   prov: Province,
   originPos?: [number, number]
@@ -85,7 +85,6 @@ export function getCoastalLandingPos(
       const distFromCenter = Math.hypot(mx - cx, my - cy);
       let score = distFromCenter;
       if (originPos) {
-        // Privilégie la côte la plus proche de l'approche maritime / origine
         const distFromOrigin = Math.hypot(mx - originPos[0], my - originPos[1]);
         score = distFromCenter * 0.65 - distFromOrigin * 0.45;
       }
@@ -97,8 +96,7 @@ export function getCoastalLandingPos(
     }
 
     if (bestPt) {
-      // Légèrement ramené vers l'intérieur (84 %) pour rester bien visible sur le littoral
-      return [cx + (bestPt[0] - cx) * 0.84, cy + (bestPt[1] - cy) * 0.84];
+      return [cx + (bestPt[0] - cx) * 0.88, cy + (bestPt[1] - cy) * 0.88];
     }
   }
 
@@ -106,18 +104,19 @@ export function getCoastalLandingPos(
     const dx = originPos[0] - cx;
     const dy = originPos[1] - cy;
     const len = Math.hypot(dx, dy) || 1;
-    return [cx + (dx / len) * 32, cy + (dy / len) * 32];
+    return [cx + (dx / len) * 34, cy + (dy / len) * 34];
   }
 
-  return [cx - 28, cy + 16];
+  return [cx - 30, cy + 16];
 }
 
 function getLegDurationFromPos(
   startPos: [number, number],
-  to: Province,
+  toPos: [number, number],
   units: UnitStack,
   isNaval: boolean,
-  isAir: boolean
+  isAir: boolean,
+  minSeconds = 3
 ): number {
   let slowest = 0;
   for (const type of UNIT_ORDER) {
@@ -128,11 +127,11 @@ function getLegDurationFromPos(
   }
   if (slowest === 0) slowest = UNIT_SPECS.soldier.travelSeconds;
 
-  const dist = Math.hypot(to.center[0] - startPos[0], to.center[1] - startPos[1]);
+  const dist = Math.hypot(toPos[0] - startPos[0], toPos[1] - startPos[1]);
   const distFactor = Math.max(0.15, dist / 145);
   const modeMult = isAir ? 0.55 : isNaval ? 1.15 : 1.0;
 
-  return Math.max(3, Math.round(slowest * distFactor * modeMult));
+  return Math.max(minSeconds, Math.round(slowest * distFactor * modeMult));
 }
 
 export function getLegDurationSeconds(
@@ -142,7 +141,7 @@ export function getLegDurationSeconds(
   isNaval: boolean,
   isAir: boolean
 ): number {
-  return Math.max(8, getLegDurationFromPos(from.center, to, units, isNaval, isAir));
+  return Math.max(8, getLegDurationFromPos(from.center, to.center, units, isNaval, isAir, 8));
 }
 
 export function findArmyRoute(
@@ -158,10 +157,6 @@ export function findArmyRoute(
 
   if (isPureAviation(units)) {
     return { route: [fromId, targetId], isAir: true, isSubmarineMission: false };
-  }
-
-  if (units.submarine > 0 && isCoastalProvince(from) && isCoastalProvince(target)) {
-    return { route: [fromId, targetId], isAir: false, isSubmarineMission: true };
   }
 
   const navalOnly = isPureNaval(units);
@@ -198,20 +193,24 @@ export function findArmyRoute(
       }
     }
 
+    // Trajet maritime longeant uniquement les provinces côtières et liaisons maritimes
     if (isCoastalProvince(curr)) {
       const seaSet = new Set(curr.seaNeighbors);
       for (const nId of curr.seaNeighbors) {
         const nb = state.provinces[nId];
-        if (!nb) continue;
+        if (!nb || !isCoastalProvince(nb)) continue;
         if (nId !== targetId && nb.owner !== owner) continue;
-        candidates.push({ id: nId, weight: distBetween(curr, nb) * 1.25 });
+        candidates.push({ id: nId, weight: distBetween(curr, nb) * 1.15 });
       }
       for (const coastId of allCoastalIds) {
         if (coastId === currentId || seaSet.has(coastId)) continue;
         const nb = state.provinces[coastId];
         if (!nb) continue;
         if (coastId !== targetId && nb.owner !== owner) continue;
-        candidates.push({ id: coastId, weight: distBetween(curr, nb) * 1.45 });
+        const d = distBetween(curr, nb);
+        if (d <= 360) {
+          candidates.push({ id: coastId, weight: d * 1.3 });
+        }
       }
     }
 
@@ -235,7 +234,14 @@ export function findArmyRoute(
     step = prev.get(step);
   }
 
-  return { route, isAir: false, isSubmarineMission: false };
+  const isSubmarineMission =
+    units.submarine > 0 &&
+    isCoastalProvince(from) &&
+    isCoastalProvince(target) &&
+    route.length >= 2 &&
+    !from.neighbors.includes(route[1]);
+
+  return { route, isAir: false, isSubmarineMission };
 }
 
 export function orderMoveArmy(
@@ -335,13 +341,18 @@ export function getMovingArmyWorldPos(state: GameState, army: MovingArmy): [numb
   const startX = army.startPos ? army.startPos[0] : from?.center[0] ?? to.center[0];
   const startY = army.startPos ? army.startPos[1] : from?.center[1] ?? to.center[1];
 
-  // Pendant un débarquement côtier, la troupe reste positionnée sur la côte (jamais au centre des terres)
+  // Arrêt sur la côte pendant le débarquement de 5 s
   if (army.landingStartedAt !== undefined && army.landingEndsAt !== undefined) {
-    return getCoastalLandingPos(to, [startX, startY]);
+    if (army.isSubmarineMission && !army.landingCompleted) {
+      return getCoastalLandingPos(to, [startX, startY]);
+    }
+    return [to.center[0], to.center[1]];
   }
 
   const dur = Math.max(1, army.legArrivalAt - army.legStartedAt);
   const t = Math.min(1, Math.max(0, (state.elapsedSeconds - army.legStartedAt) / dur));
+
+  // Avant la fin du débarquement, la cible visuelle est la côte ; ensuite les unités marchent vers le centre
   const destPos: [number, number] =
     army.isSubmarineMission && !army.landingCompleted
       ? getCoastalLandingPos(to, [startX, startY])
@@ -389,7 +400,14 @@ export function orderTurnAround(
 
   const firstStopId = returnWaypoints[0];
   const firstStopProv = state.provinces[firstStopId];
-  const dur = getLegDurationFromPos(curPos, firstStopProv, army.units, army.isNaval, army.isAir);
+  const dur = getLegDurationFromPos(
+    curPos,
+    firstStopProv.center,
+    army.units,
+    army.isNaval,
+    army.isAir,
+    3
+  );
 
   army.startPos = curPos;
   army.fromProvinceId = oldTo;
@@ -440,7 +458,7 @@ export function orderRedirectArmy(
   const now = state.elapsedSeconds;
 
   if (army.isAir || isPureAviation(army.units)) {
-    const dur = getLegDurationFromPos(curPos, target, army.units, false, true);
+    const dur = getLegDurationFromPos(curPos, target.center, army.units, false, true, 3);
     army.startPos = curPos;
     army.route = [army.fromProvinceId, newTargetId];
     army.currentLegIndex = 0;
@@ -463,7 +481,8 @@ export function orderRedirectArmy(
     isCoastalProvince(target) &&
     (army.isSubmarineMission || army.isNaval)
   ) {
-    const dur = getLegDurationFromPos(curPos, target, army.units, true, false);
+    const coastPt = getCoastalLandingPos(target, curPos);
+    const dur = getLegDurationFromPos(curPos, coastPt, army.units, true, false, 3);
     army.startPos = curPos;
     army.route = [army.fromProvinceId, newTargetId];
     army.currentLegIndex = 0;
@@ -483,7 +502,7 @@ export function orderRedirectArmy(
   if (newTargetId === army.fromProvinceId || newTargetId === army.toProvinceId) {
     const fromProv = state.provinces[army.fromProvinceId];
     const isNaval = army.isNaval || (Boolean(fromProv) && !fromProv.neighbors.includes(newTargetId));
-    const dur = getLegDurationFromPos(curPos, target, army.units, isNaval, false);
+    const dur = getLegDurationFromPos(curPos, target.center, army.units, isNaval, false, 3);
     army.startPos = curPos;
     army.route = [army.fromProvinceId, newTargetId];
     army.currentLegIndex = 0;
@@ -561,7 +580,7 @@ export function orderRedirectArmy(
     army.isNaval ||
     (!state.provinces[army.fromProvinceId]?.neighbors.includes(nextId) &&
       !state.provinces[army.toProvinceId]?.neighbors.includes(nextId));
-  const dur = getLegDurationFromPos(curPos, nextProv, army.units, isNaval, false);
+  const dur = getLegDurationFromPos(curPos, nextProv.center, army.units, isNaval, false, 3);
 
   army.startPos = curPos;
   army.route = [army.fromProvinceId, ...bestWaypoints];
@@ -1099,18 +1118,42 @@ export function tickMovementsAndCombat(state: GameState): void {
   for (const army of state.movingArmies) {
     if (totalStack(army.units) <= 0) continue;
 
-    // 1. Si un timer de débarquement ou d'annexion est en cours, on attend sa fin exacte
+    // 1. Timer actif (débarquement côtier de 5 s ou occupation de 10 s)
     if (army.landingStartedAt !== undefined && army.landingEndsAt !== undefined) {
       if (state.elapsedSeconds < army.landingEndsAt) {
         stillMoving.push(army);
         continue;
       }
-      // Timer terminé : on nettoie le timer et on marque la fin de la phase de débarquement
+
+      const targetProv = state.provinces[army.toProvinceId];
       army.landingStartedAt = undefined;
       army.landingEndsAt = undefined;
-      army.landingCompleted = true;
+
+      // Fin du débarquement côtier de 5 s : les unités avancent maintenant vers le centre de la région
+      if (army.isSubmarineMission && !army.landingCompleted && targetProv) {
+        army.landingCompleted = true;
+        const coastPos = getCoastalLandingPos(targetProv, army.startPos);
+        const walkDur = getLegDurationFromPos(
+          coastPos,
+          targetProv.center,
+          army.units,
+          false,
+          false,
+          4
+        );
+        army.startPos = coastPos;
+        army.legStartedAt = state.elapsedSeconds;
+        army.legArrivalAt = state.elapsedSeconds + walkDur;
+        stillMoving.push(army);
+        continue;
+      }
+
+      // Fin des 10 s d'occupation sur une province vide : capture définitive
+      if (targetProv && targetProv.owner !== army.owner && totalStack(targetProv.garrison) <= 0) {
+        captureProvince(state, targetProv, army.owner, army.units);
+        continue;
+      }
     } else if (state.elapsedSeconds < army.legArrivalAt) {
-      // Encore en transit vers la province/côte
       stillMoving.push(army);
       continue;
     }
@@ -1150,7 +1193,7 @@ export function tickMovementsAndCombat(state: GameState): void {
       continue;
     }
 
-    // 5. Phase de débarquement côtier (5 s) pour une mission de sous-marin : exécutée UNE SEULE FOIS
+    // 5. Arrivée sur la côte en mission de débarquement : arrêt à la côte pendant 5 s
     if (army.isSubmarineMission && !army.landingCompleted) {
       army.landingStartedAt = state.elapsedSeconds;
       army.landingEndsAt = state.elapsedSeconds + GAME_CONFIG.submarineLandingSeconds;
@@ -1162,7 +1205,7 @@ export function tickMovementsAndCombat(state: GameState): void {
       if (arrivedProv.owner === state.playerNationId || army.owner === state.playerNationId) {
         pushTelegram(
           state,
-          `ALERTE DÉBARQUEMENT (${GAME_CONFIG.submarineLandingSeconds} s) : débarquement côtier de ${NATION_TEMPLATES[army.owner].shortName} à ${arrivedProv.name} !`,
+          `DÉBARQUEMENT CÔTIER (${GAME_CONFIG.submarineLandingSeconds} s) : arrêt sur les côtes de ${arrivedProv.name} avant progression vers l’intérieur.`,
           arrivedProv.owner === state.playerNationId ? 'danger' : 'warning',
           arrivedProv.id
         );
@@ -1175,7 +1218,7 @@ export function tickMovementsAndCombat(state: GameState): void {
 
     const isNavalLanding = army.isNaval && !army.isSubmarineMission && !army.isAir;
 
-    // 6. Province sans garnison : aviation vs occupation/annexion de 10 s (sans boucle)
+    // 6. Province sans garnison : aviation vs occupation/capture de 10 s
     if (totalStack(arrivedProv.garrison) <= 0) {
       if (army.isAir) {
         applySpecialStrikeEffects(state, army.units, arrivedProv, army.owner);
@@ -1184,21 +1227,18 @@ export function tickMovementsAndCombat(state: GameState): void {
           autoReturnArmyFromAlly(state, army, arrivedProv);
           stillMoving.push(army);
         }
-      } else if (!army.landingCompleted) {
+      } else {
         army.landingStartedAt = state.elapsedSeconds;
         army.landingEndsAt = state.elapsedSeconds + GAME_CONFIG.occupationDurationSeconds;
         if (arrivedProv.owner === state.playerNationId || army.owner === state.playerNationId) {
           pushTelegram(
             state,
-            `Annexion de ${arrivedProv.name} en cours (${GAME_CONFIG.occupationDurationSeconds} s)...`,
+            `Capture de ${arrivedProv.name} en cours (${GAME_CONFIG.occupationDurationSeconds} s)...`,
             arrivedProv.owner === state.playerNationId ? 'warning' : 'info',
             arrivedProv.id
           );
         }
         stillMoving.push(army);
-      } else {
-        // Les 10 secondes d'occupation sont écoulées -> capture définitive
-        captureProvince(state, arrivedProv, army.owner, army.units);
       }
       continue;
     }

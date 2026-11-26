@@ -242,6 +242,16 @@ export function MapCanvas({
     }
   };
 
+  const releasePointer = (target: HTMLCanvasElement, pointerId: number) => {
+    if (target.hasPointerCapture(pointerId)) {
+      target.releasePointerCapture(pointerId);
+    }
+    pointersRef.current.delete(pointerId);
+    if (pointersRef.current.size < 2) {
+      pinchStartDistRef.current = null;
+    }
+  };
+
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId);
     pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -281,7 +291,7 @@ export function MapCanvas({
     if (gestureRef.current.active) {
       const dx = e.clientX - gestureRef.current.startX;
       const dy = e.clientY - gestureRef.current.startY;
-      if (Math.hypot(dx, dy) > 7) gestureRef.current.moved = true;
+      if (Math.hypot(dx, dy) > 6) gestureRef.current.moved = true;
       if (gestureRef.current.moved) {
         setCamera((prev) =>
           clampCamera(
@@ -300,18 +310,16 @@ export function MapCanvas({
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    pointersRef.current.delete(e.pointerId);
-    if (pointersRef.current.size < 2) {
-      pinchStartDistRef.current = null;
-    }
-
     const wasMoved = gestureRef.current.moved;
     const pressDurationMs = performance.now() - gestureRef.current.downAt;
     gestureRef.current.active = false;
 
-    const isShortTap = !wasMoved && (e.pointerType !== 'touch' || pressDurationMs < 340);
+    const remainingBeforeDelete = pointersRef.current.size;
+    releasePointer(e.currentTarget, e.pointerId);
 
-    if (isShortTap && pointersRef.current.size === 0) {
+    const isShortTap = !wasMoved && (e.pointerType !== 'touch' || pressDurationMs < 400);
+
+    if (isShortTap && remainingBeforeDelete === 1) {
       const { wx, wy } = screenToWorld(e.clientX, e.clientY);
 
       if (redirectingArmy) {
@@ -347,6 +355,11 @@ export function MapCanvas({
     }
   };
 
+  const handlePointerCancel = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    gestureRef.current.active = false;
+    releasePointer(e.currentTarget, e.pointerId);
+  };
+
   const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     const factor = e.deltaY < 0 ? 1.12 : 0.9;
@@ -354,16 +367,16 @@ export function MapCanvas({
   };
 
   return (
-    <div className="relative h-full w-full overflow-hidden touch-none">
+    <div className="relative h-full w-full overflow-hidden">
       <canvas
         ref={canvasRef}
-        className={`block h-full w-full ${
+        className={`block h-full w-full touch-pan-x touch-pan-y ${
           isTargetingAny ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'
         }`}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerUp}
+        onPointerCancel={handlePointerCancel}
         onWheel={handleWheel}
       />
 

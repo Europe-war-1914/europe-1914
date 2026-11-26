@@ -699,34 +699,47 @@ export function drawMap(
   }
   ctx.restore();
 
-  // Aperçu rectiligne de la destination choisie
-  if (movePreview && movePreview.route.length >= 1) {
-    const originProv = state.provinces[movePreview.fromId];
-    const destProv = state.provinces[movePreview.route[movePreview.route.length - 1]];
-    const startPt = movePreview.startPos ?? originProv?.center;
-    if (startPt && destProv && movePreview.route.length >= 2) {
-      ctx.save();
-      ctx.strokeStyle = movePreview.isSubmarineMission
-        ? '#38bdf8'
-        : movePreview.isAir
-        ? '#f59e0b'
-        : movePreview.isHostile
-        ? '#ef4444'
-        : '#4ade80';
-      ctx.lineWidth = 3;
-      ctx.setLineDash([8, 5]);
-      ctx.lineDashOffset = -timeSec * 28;
-      ctx.beginPath();
-      ctx.moveTo(startPt[0], startPt[1]);
-      ctx.lineTo(destProv.center[0], destProv.center[1]);
-      ctx.stroke();
+  // Aperçu suivant l'itinéraire calculé (côtes/mer ou terre)
+  if (
+    movePreview &&
+    (movePreview.route.length >= 2 || (movePreview.startPos && movePreview.route.length >= 1))
+  ) {
+    ctx.save();
+    ctx.strokeStyle = movePreview.isSubmarineMission
+      ? '#38bdf8'
+      : movePreview.isAir
+      ? '#f59e0b'
+      : movePreview.isHostile
+      ? '#ef4444'
+      : '#4ade80';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([8, 5]);
+    ctx.lineDashOffset = -timeSec * 28;
+    ctx.beginPath();
+    if (movePreview.startPos) {
+      ctx.moveTo(movePreview.startPos[0], movePreview.startPos[1]);
+      movePreview.route.forEach((pId) => {
+        const p = state.provinces[pId];
+        if (p) ctx.lineTo(p.center[0], p.center[1]);
+      });
+    } else {
+      movePreview.route.forEach((pId, idx) => {
+        const p = state.provinces[pId];
+        if (!p) return;
+        if (idx === 0) ctx.moveTo(p.center[0], p.center[1]);
+        else ctx.lineTo(p.center[0], p.center[1]);
+      });
+    }
+    ctx.stroke();
 
+    const dest = state.provinces[movePreview.route[movePreview.route.length - 1]];
+    if (dest) {
       ctx.setLineDash([]);
       ctx.beginPath();
-      ctx.arc(destProv.center[0], destProv.center[1], 18, 0, Math.PI * 2);
+      ctx.arc(dest.center[0], dest.center[1], 18, 0, Math.PI * 2);
       ctx.stroke();
-      ctx.restore();
     }
+    ctx.restore();
   }
 
   for (const prov of provinces) {
@@ -763,14 +776,13 @@ export function drawMap(
     }
   }
 
-  // Trajectoires rectilignes & pions des armées en mouvement
+  // Trajectoires étape par étape (longeant les côtes / étapes de route) & pions des armées
   for (const army of state.movingArmies) {
     if (!isMovingArmyVisibleTo(state, army, state.playerNationId)) continue;
 
     const from = state.provinces[army.fromProvinceId];
     const to = state.provinces[army.toProvinceId];
-    const finalDest = state.provinces[army.targetProvinceId] ?? to;
-    if (!to || !finalDest) continue;
+    if (!to) continue;
 
     const [ax, ay] = getMovingArmyWorldPos(state, army);
     const startX = army.startPos ? army.startPos[0] : from?.center[0] ?? ax;
@@ -793,7 +805,10 @@ export function drawMap(
     ctx.setLineDash(army.isAir ? [3, 4] : [6, 4]);
     ctx.beginPath();
     ctx.moveTo(ax, ay);
-    ctx.lineTo(finalDest.center[0], finalDest.center[1]);
+    for (let i = army.currentLegIndex + 1; i < army.route.length; i++) {
+      const wp = state.provinces[army.route[i]];
+      if (wp) ctx.lineTo(wp.center[0], wp.center[1]);
+    }
     ctx.stroke();
     ctx.restore();
 

@@ -30,10 +30,10 @@ type CachedSprite = {
 
 const spriteCache: Partial<Record<UnitType, CachedSprite | 'failed'>> = {};
 
-/** Détoure automatiquement le fond sombre uniforme des sprites JPG/PNG opaques */
+/** Détoure proprement le fond uni sombre sans grignoter les ombres de la figurine */
 function buildCutoutSprite(img: HTMLImageElement): HTMLCanvasElement | HTMLImageElement {
   try {
-    const size = 160;
+    const size = 256;
     const work = document.createElement('canvas');
     work.width = size;
     work.height = size;
@@ -68,23 +68,31 @@ function buildCutoutSprite(img: HTMLImageElement): HTMLCanvasElement | HTMLImage
     bgG /= 4;
     bgB /= 4;
 
+    const isBackgroundPixel = (pixelIdx: number) => {
+      const i = pixelIdx * 4;
+      const dr = Math.abs(data[i] - bgR);
+      const dg = Math.abs(data[i + 1] - bgG);
+      const db = Math.abs(data[i + 2] - bgB);
+      if (dr > 11 || dg > 11 || db > 11) return false;
+      return dr * dr + dg * dg + db * db <= 256; // distance <= 16
+    };
+
     const colorDist = (pixelIdx: number) => {
       const i = pixelIdx * 4;
       return Math.hypot(data[i] - bgR, data[i + 1] - bgG, data[i + 2] - bgB);
     };
 
-    // Flood-fill depuis les bords pour supprimer uniquement le fond extérieur
+    // Flood-fill strict depuis les bords extérieurs uniquement
     const totalPixels = size * size;
     const visited = new Uint8Array(totalPixels);
     const removed = new Uint8Array(totalPixels);
     const queue = new Int32Array(totalPixels);
     let head = 0;
     let tail = 0;
-    const threshold = 40;
 
     const tryEnqueue = (p: number) => {
       if (visited[p]) return;
-      if (colorDist(p) <= threshold) {
+      if (isBackgroundPixel(p)) {
         visited[p] = 1;
         queue[tail++] = p;
       }
@@ -112,7 +120,7 @@ function buildCutoutSprite(img: HTMLImageElement): HTMLCanvasElement | HTMLImage
       if (y < size - 1) tryEnqueue(p + size);
     }
 
-    // Adoucissement léger de la bordure pour éviter un halo sombre
+    // Adoucissement très léger uniquement sur le contour immédiat (1 px)
     for (let y = 1; y < size - 1; y++) {
       for (let x = 1; x < size - 1; x++) {
         const p = y * size + x;
@@ -124,8 +132,8 @@ function buildCutoutSprite(img: HTMLImageElement): HTMLCanvasElement | HTMLImage
           removed[p + size]
         ) {
           const d = colorDist(p);
-          if (d < 68) {
-            const factor = Math.max(0, Math.min(1, (d - 28) / 40));
+          if (d < 28) {
+            const factor = Math.max(0.25, Math.min(1, (d - 14) / 14));
             data[p * 4 + 3] = Math.round(data[p * 4 + 3] * factor);
           }
         }
@@ -141,7 +149,7 @@ function buildCutoutSprite(img: HTMLImageElement): HTMLCanvasElement | HTMLImage
     let maxY = 0;
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
-        if (data[(y * size + x) * 4 + 3] > 25) {
+        if (data[(y * size + x) * 4 + 3] > 30) {
           if (x < minX) minX = x;
           if (x > maxX) maxX = x;
           if (y < minY) minY = y;

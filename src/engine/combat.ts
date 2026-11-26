@@ -19,6 +19,7 @@ import type {
   PlayableNationId,
   Province,
   UnitStack,
+  UnitType,
 } from './types';
 
 export function totalStack(stack: UnitStack): number {
@@ -722,6 +723,63 @@ function applyDamageToStack(stack: UnitStack, damage: number): void {
   }
 }
 
+function applyDamageToTargetedUnits(
+  stack: UnitStack,
+  damage: number,
+  targetTypes: UnitType[]
+): void {
+  if (damage <= 0) return;
+  let remaining = damage;
+  for (const type of targetTypes) {
+    if (remaining <= 0) break;
+    const qty = stack[type];
+    if (qty <= 0) continue;
+    const unitHp = UNIT_SPECS[type].hp;
+    const kills = Math.min(qty, Math.floor(remaining / unitHp));
+    if (kills > 0) {
+      stack[type] -= kills;
+      remaining -= kills * unitHp;
+    } else if (remaining >= unitHp * 0.5 && Math.random() < remaining / unitHp) {
+      stack[type] -= 1;
+      remaining = 0;
+    }
+  }
+  if (remaining > 0) {
+    applyDamageToStack(stack, remaining);
+  }
+}
+
+/** Inflige des dégâts directs aux unités adverses selon les défenses actives de la province */
+function applyDefenseRetaliationDamage(
+  state: GameState,
+  prov: Province,
+  enemyStack: UnitStack,
+  isNavalContext = false
+): void {
+  if (totalStack(enemyStack) <= 0) return;
+  const now = state.elapsedSeconds;
+
+  const trenchesLvl = getEffectiveDefenseLevel(prov, 'trenches', now);
+  if (trenchesLvl > 0) {
+    applyDamageToTargetedUnits(enemyStack, trenchesLvl * 14, ['light_tank', 'heavy_tank']);
+  }
+
+  const bunkersLvl = getEffectiveDefenseLevel(prov, 'bunkers', now);
+  if (bunkersLvl > 0) {
+    applyDamageToTargetedUnits(enemyStack, bunkersLvl * 13, ['scout', 'soldier']);
+  }
+
+  const aaLvl = getEffectiveDefenseLevel(prov, 'aa_defense', now);
+  if (aaLvl > 0) {
+    applyDamageToTargetedUnits(enemyStack, aaLvl * 18, ['bomber', 'fighter']);
+  }
+
+  const navalLvl = getEffectiveDefenseLevel(prov, 'naval_defense', now);
+  if (navalLvl > 0 && (isNavalContext || enemyStack.frigate > 0 || enemyStack.submarine > 0)) {
+    applyDamageToTargetedUnits(enemyStack, navalLvl * 20, ['frigate', 'submarine']);
+  }
+}
+
 export function eliminateNation(
   state: GameState,
   loserId: PlayableNationId,
@@ -899,7 +957,7 @@ function tickArmyEncountersAndNaval(state: GameState): void {
           army.units.light_tank > 0 ||
           army.units.heavy_tank > 0;
         if (hasNormalUnits) {
-          applyDamageToStack(army.units, coastDefLvl * 18);
+          applyDamageToStack(army.units, coastDefLvl * 22);
         }
       }
     }
@@ -1058,8 +1116,11 @@ export function tickMovementsAndCombat(state: GameState): void {
     if (totalStack(arrivedProv.garrison) <= 0) {
       if (army.isAir) {
         applySpecialStrikeEffects(state, army.units, arrivedProv, army.owner);
-        autoReturnArmyFromAlly(state, army, arrivedProv);
-        stillMoving.push(army);
+        applyDefenseRetaliationDamage(state, arrivedProv, army.units, false);
+        if (totalStack(army.units) > 0) {
+          autoReturnArmyFromAlly(state, army, arrivedProv);
+          stillMoving.push(army);
+        }
       } else {
         // Délai d'annexion de 10 s lorsqu'il n'y a plus aucune unité dans la province
         if (army.landingStartedAt === undefined) {
@@ -1152,6 +1213,12 @@ export function tickMovementsAndCombat(state: GameState): void {
 
     applyDamageToStack(prov.garrison, attPower * (0.85 + Math.random() * 0.3));
     applyDamageToStack(battle.attackerUnits, defPower * (0.85 + Math.random() * 0.3));
+    applyDefenseRetaliationDamage(
+      state,
+      prov,
+      battle.attackerUnits,
+      Boolean(battle.isNavalStrike)
+    );
 
     const attAlive = totalStack(battle.attackerUnits) > 0;
     const defAlive = totalStack(prov.garrison) > 0;

@@ -51,9 +51,9 @@ export const GAME_CONFIG = {
     gas: 260,
   } as ResourcePool,
   startingTechPoints: 80,
-  startingGarrisonCapital: { soldier: 6, scout: 2 },
-  startingGarrisonProvince: { soldier: 3, scout: 1 },
-  startingGarrisonNeutral: { soldier: 4, scout: 1 },
+  startingGarrisonCapital: { soldier: 12, scout: 4 },
+  startingGarrisonProvince: { soldier: 6, scout: 2 },
+  startingGarrisonNeutral: { soldier: 8, scout: 2 },
 };
 
 export const LAB_TP_PER_MINUTE: Record<number, number> = {

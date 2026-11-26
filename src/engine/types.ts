@@ -13,7 +13,7 @@ export type PlayableNationId = Exclude<NationId, 'neutral'>;
 
 export type GameMode = 'blitz' | 'campaign';
 
-export type AiDifficulty = 'standard' | 'hardcore';
+export type AiDifficulty = 'standard' | 'hard' | 'hardcore';
 
 export interface MatchSettings {
   mode: GameMode;
@@ -81,11 +81,15 @@ export interface DefenseWeakness {
   expiresAt: number;
 }
 
+export type ConstructionKind = 'barracks' | 'laboratory' | 'extraction' | 'defense';
+
 export interface ConstructionOrder {
   id: string;
   owner: NationId;
   provinceId: string;
-  kind: 'barracks' | 'laboratory' | 'extraction' | 'defense';
+  kind: ConstructionKind;
+  targetKey: string;
+  targetLevel: number;
   resource?: ExtractionResource;
   defense?: DefenseType;
   startedAt: number;
@@ -172,6 +176,8 @@ export interface Nation {
   resources: ResourcePool;
   techPoints: number;
   techLevels: Record<TechAxis, number>;
+  activeAllianceWith: PlayableNationId | null;
+  lastAttackAt?: number;
   isEliminated: boolean;
   capitalProvinceId?: string;
 }
@@ -181,6 +187,8 @@ export interface DiplomaticOffer {
   from: PlayableNationId;
   to: PlayableNationId;
   type: 'nap' | 'alliance' | 'peace';
+  goldEscrow?: number;
+  aiDecisionAt?: number;
   createdAt: number;
   expiresAt: number;
 }

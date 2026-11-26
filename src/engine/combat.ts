@@ -574,7 +574,12 @@ export function retreatFromBattle(
   state.battles.splice(idx, 1);
 
   if (nationId === state.playerNationId) {
-    pushTelegram(state, `Retraite ordonnée depuis ${prov.name} vers ${fallback.name}.`, 'warning', fallback.id);
+    pushTelegram(
+      state,
+      `Retraite ordonnée depuis ${prov.name} vers ${fallback.name}.`,
+      'warning',
+      fallback.id
+    );
   }
 
   return { ok: true };

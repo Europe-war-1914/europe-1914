@@ -37,8 +37,8 @@ export const GAME_CONFIG = {
   combatTickSeconds: 3,
   defenseWeaknessDurationSeconds: 120,
   submarineLandingSeconds: 10,
-  capitalCaptureTechBonus: 120,
-  capitalCaptureTechStealRatio: 0.3,
+  capitalCaptureTechBonus: 240,
+  capitalCaptureTechStealRatio: 0.35,
   allianceCostGold: 250,
   betrayalCostGold: 350,
   aiDiplomacyMinThinkSeconds: 8,
@@ -57,9 +57,9 @@ export const GAME_CONFIG = {
 
 export const LAB_TP_PER_MINUTE: Record<number, number> = {
   0: 0,
-  1: 4,
-  2: 7.5,
-  3: 12,
+  1: 20,
+  2: 37.5,
+  3: 60,
 };
 
 export const DEFENSE_COUNTER_REDUCTION: Record<number, number> = {
@@ -235,9 +235,9 @@ export const UNIT_SPECS: Record<UnitType, UnitSpec> = {
 };
 
 export const TECH_COSTS_TP: Record<1 | 2 | 3, number> = {
-  1: 50,
-  2: 100,
-  3: 175,
+  1: 40,
+  2: 80,
+  3: 140,
 };
 
 export interface TechAxisSpec {
@@ -400,7 +400,6 @@ export function getBarracksCost(currentLevel: number): { cost: ResourcePool; bui
   };
 }
 
-// Laboratoire unique (capitale) : investissement stratégique rare et coûteux (niv. 1 -> 2 -> 3)
 export function getLaboratoryCost(currentLevel: number): {
   cost: ResourcePool;
   buildSeconds: number;

@@ -141,6 +141,7 @@ export interface MovingArmy {
   legStartedAt: number;
   legArrivalAt: number;
   startPos?: [number, number];
+  clashPos?: [number, number];
   isNaval: boolean;
   isAir: boolean;
   isSubmarineMission: boolean;
@@ -158,6 +159,10 @@ export interface ActiveBattle {
   defender: NationId;
   attackerUnits: UnitStack;
   defenderUnits: UnitStack;
+  attackerArmyId?: string;
+  defenderArmyId?: string;
+  clashPos?: [number, number];
+  isFieldClash?: boolean;
   startedAt: number;
   lastTickAt: number;
   isAirStrike?: boolean;

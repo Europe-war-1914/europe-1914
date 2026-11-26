@@ -65,7 +65,14 @@ function distBetween(a: Province, b: Province): number {
   return Math.hypot(a.center[0] - b.center[0], a.center[1] - b.center[1]);
 }
 
-/** Calcule un point sur le littoral de la province cible pour l'arrêt et le débarquement */
+function isArmyLockedInFieldBattle(state: GameState, armyId: string): boolean {
+  return state.battles.some(
+    (b) =>
+      b.isFieldClash &&
+      (b.attackerArmyId === armyId || b.defenderArmyId === armyId)
+  );
+}
+
 export function getCoastalLandingPos(
   prov: Province,
   originPos?: [number, number]
@@ -193,7 +200,6 @@ export function findArmyRoute(
       }
     }
 
-    // Trajet maritime longeant uniquement les provinces côtières et liaisons maritimes
     if (isCoastalProvince(curr)) {
       const seaSet = new Set(curr.seaNeighbors);
       for (const nId of curr.seaNeighbors) {
@@ -334,6 +340,10 @@ export function orderMoveArmy(
 }
 
 export function getMovingArmyWorldPos(state: GameState, army: MovingArmy): [number, number] {
+  if (army.clashPos) {
+    return [army.clashPos[0], army.clashPos[1]];
+  }
+
   const from = state.provinces[army.fromProvinceId];
   const to = state.provinces[army.toProvinceId];
   if (!to) return [0, 0];
@@ -341,7 +351,6 @@ export function getMovingArmyWorldPos(state: GameState, army: MovingArmy): [numb
   const startX = army.startPos ? army.startPos[0] : from?.center[0] ?? to.center[0];
   const startY = army.startPos ? army.startPos[1] : from?.center[1] ?? to.center[1];
 
-  // Arrêt sur la côte pendant le débarquement de 5 s
   if (army.landingStartedAt !== undefined && army.landingEndsAt !== undefined) {
     if (army.isSubmarineMission && !army.landingCompleted) {
       return getCoastalLandingPos(to, [startX, startY]);
@@ -352,13 +361,24 @@ export function getMovingArmyWorldPos(state: GameState, army: MovingArmy): [numb
   const dur = Math.max(1, army.legArrivalAt - army.legStartedAt);
   const t = Math.min(1, Math.max(0, (state.elapsedSeconds - army.legStartedAt) / dur));
 
-  // Avant la fin du débarquement, la cible visuelle est la côte ; ensuite les unités marchent vers le centre
   const destPos: [number, number] =
     army.isSubmarineMission && !army.landingCompleted
       ? getCoastalLandingPos(to, [startX, startY])
       : [to.center[0], to.center[1]];
 
   return [startX + (destPos[0] - startX) * t, startY + (destPos[1] - startY) * t];
+}
+
+function resumeArmyAfterClash(state: GameState, army: MovingArmy): void {
+  const curPos = getMovingArmyWorldPos(state, army);
+  const destProv = state.provinces[army.toProvinceId];
+  army.clashPos = undefined;
+  army.startPos = curPos;
+  army.legStartedAt = state.elapsedSeconds;
+  const dur = destProv
+    ? getLegDurationFromPos(curPos, destProv.center, army.units, army.isNaval, army.isAir, 5)
+    : 8;
+  army.legArrivalAt = state.elapsedSeconds + dur;
 }
 
 export function orderTurnAround(
@@ -373,6 +393,11 @@ export function orderTurnAround(
 
   const curPos = getMovingArmyWorldPos(state, army);
   const now = state.elapsedSeconds;
+
+  army.clashPos = undefined;
+  state.battles = state.battles.filter(
+    (b) => !(b.isFieldClash && (b.attackerArmyId === armyId || b.defenderArmyId === armyId))
+  );
 
   army.landingStartedAt = undefined;
   army.landingEndsAt = undefined;
@@ -456,6 +481,11 @@ export function orderRedirectArmy(
 
   const curPos = getMovingArmyWorldPos(state, army);
   const now = state.elapsedSeconds;
+
+  army.clashPos = undefined;
+  state.battles = state.battles.filter(
+    (b) => !(b.isFieldClash && (b.attackerArmyId === armyId || b.defenderArmyId === armyId))
+  );
 
   if (army.isAir || isPureAviation(army.units)) {
     const dur = getLegDurationFromPos(curPos, target.center, army.units, false, true, 3);
@@ -616,6 +646,14 @@ export function retreatFromBattle(
     return { ok: false, reason: 'Seul l’attaquant peut rompre cet engagement.' };
   }
 
+  if (battle.isFieldClash) {
+    const army = state.movingArmies.find((a) => a.id === battle.attackerArmyId);
+    if (army) {
+      state.battles.splice(idx, 1);
+      return orderTurnAround(state, nationId, army.id);
+    }
+  }
+
   const prov = state.provinces[battle.provinceId];
   const fallback =
     [...prov.neighbors, ...prov.seaNeighbors]
@@ -766,12 +804,12 @@ function computeFieldClashPower(
     if (qty <= 0) continue;
 
     const spec = UNIT_SPECS[type];
-    let unitPower = (spec.attack + spec.defense) * 0.55;
+    let unitPower = (spec.attack + spec.defense) * 0.42;
     const techLvl = nation ? nation.techLevels[spec.armyTechAxis] ?? 0 : 0;
     unitPower *= 1 + techLvl * 0.2;
 
     if (type === 'fighter' && enemyAirCount > 0) {
-      unitPower *= 2.1;
+      unitPower *= 2.0;
     }
 
     power += qty * unitPower;
@@ -780,8 +818,10 @@ function computeFieldClashPower(
   return power;
 }
 
-function applyDamageToStack(stack: UnitStack, damage: number): void {
-  let remaining = damage;
+function applyDamageToStack(stack: UnitStack, damage: number, maxRatioPerTick = 0.38): void {
+  const stackHp = UNIT_ORDER.reduce((sum, t) => sum + (stack[t] ?? 0) * UNIT_SPECS[t].hp, 0);
+  let remaining = Math.min(damage, stackHp * maxRatioPerTick);
+
   for (const type of UNIT_ORDER) {
     if (remaining <= 0) break;
     const qty = stack[type];
@@ -791,7 +831,7 @@ function applyDamageToStack(stack: UnitStack, damage: number): void {
     if (kills > 0) {
       stack[type] -= kills;
       remaining -= kills * unitHp;
-    } else if (remaining >= unitHp * 0.45 && Math.random() < remaining / unitHp) {
+    } else if (remaining >= unitHp * 0.5 && Math.random() < remaining / unitHp) {
       stack[type] -= 1;
       remaining = 0;
     }
@@ -814,13 +854,10 @@ function applyDamageToTargetedUnits(
     if (kills > 0) {
       stack[type] -= kills;
       remaining -= kills * unitHp;
-    } else if (remaining >= unitHp * 0.5 && Math.random() < remaining / unitHp) {
+    } else if (remaining >= unitHp * 0.55 && Math.random() < remaining / unitHp) {
       stack[type] -= 1;
       remaining = 0;
     }
-  }
-  if (remaining > 0) {
-    applyDamageToStack(stack, remaining);
   }
 }
 
@@ -835,22 +872,22 @@ function applyDefenseRetaliationDamage(
 
   const trenchesLvl = getEffectiveDefenseLevel(prov, 'trenches', now);
   if (trenchesLvl > 0) {
-    applyDamageToTargetedUnits(enemyStack, trenchesLvl * 14, ['light_tank', 'heavy_tank']);
+    applyDamageToTargetedUnits(enemyStack, trenchesLvl * 11, ['light_tank', 'heavy_tank']);
   }
 
   const bunkersLvl = getEffectiveDefenseLevel(prov, 'bunkers', now);
   if (bunkersLvl > 0) {
-    applyDamageToTargetedUnits(enemyStack, bunkersLvl * 13, ['scout', 'soldier']);
+    applyDamageToTargetedUnits(enemyStack, bunkersLvl * 10, ['scout', 'soldier']);
   }
 
   const aaLvl = getEffectiveDefenseLevel(prov, 'aa_defense', now);
   if (aaLvl > 0) {
-    applyDamageToTargetedUnits(enemyStack, aaLvl * 18, ['bomber', 'fighter']);
+    applyDamageToTargetedUnits(enemyStack, aaLvl * 14, ['bomber', 'fighter']);
   }
 
   const navalLvl = getEffectiveDefenseLevel(prov, 'naval_defense', now);
   if (navalLvl > 0 && (isNavalContext || enemyStack.frigate > 0 || enemyStack.submarine > 0)) {
-    applyDamageToTargetedUnits(enemyStack, navalLvl * 20, ['frigate', 'submarine']);
+    applyDamageToTargetedUnits(enemyStack, navalLvl * 15, ['frigate', 'submarine']);
   }
 }
 
@@ -954,10 +991,13 @@ function captureProvince(
   }
 }
 
-function tickArmyEncountersAndNaval(state: GameState): void {
+/** Détecte quand 2 armées ennemies se croisent : les arrête et déclenche une vraie bataille de campagne */
+function checkFieldArmyEncounters(state: GameState): void {
   for (let i = 0; i < state.movingArmies.length; i++) {
     const a = state.movingArmies[i];
     if (!a || totalStack(a.units) <= 0) continue;
+    if (isArmyLockedInFieldBattle(state, a.id)) continue;
+
     const posA = getMovingArmyWorldPos(state, a);
 
     for (let j = i + 1; j < state.movingArmies.length; j++) {
@@ -965,6 +1005,7 @@ function tickArmyEncountersAndNaval(state: GameState): void {
       if (!b || totalStack(b.units) <= 0) continue;
       if (a.owner === b.owner) continue;
       if (getDiplomaticStatus(state, a.owner, b.owner) === 'alliance') continue;
+      if (isArmyLockedInFieldBattle(state, b.id)) continue;
 
       const sameDomain = a.isAir === b.isAir;
       if (!sameDomain) continue;
@@ -974,25 +1015,55 @@ function tickArmyEncountersAndNaval(state: GameState): void {
 
       setDiplomaticStatus(state, a.owner, b.owner, 'war');
 
-      const powerA = computeFieldClashPower(state, a.owner, a.units, b.units);
-      const powerB = computeFieldClashPower(state, b.owner, b.units, a.units);
+      const clashPoint: [number, number] = [
+        (posA[0] + posB[0]) / 2,
+        (posA[1] + posB[1]) / 2,
+      ];
+      a.clashPos = [...clashPoint];
+      b.clashPos = [...clashPoint];
+      a.landingStartedAt = undefined;
+      a.landingEndsAt = undefined;
+      b.landingStartedAt = undefined;
+      b.landingEndsAt = undefined;
 
-      applyDamageToStack(b.units, powerA * (0.9 + Math.random() * 0.25));
-      applyDamageToStack(a.units, powerB * (0.9 + Math.random() * 0.25));
+      state.battles.push({
+        id: createId('clash'),
+        provinceId: a.toProvinceId,
+        attacker: a.owner,
+        defender: b.owner,
+        attackerUnits: a.units,
+        defenderUnits: b.units,
+        attackerArmyId: a.id,
+        defenderArmyId: b.id,
+        clashPos: clashPoint,
+        isFieldClash: true,
+        startedAt: state.elapsedSeconds,
+        lastTickAt: state.elapsedSeconds,
+        isAirStrike: a.isAir,
+        isNavalStrike: a.isNaval || b.isNaval,
+      });
 
       if (a.owner === state.playerNationId || b.owner === state.playerNationId) {
         const other = a.owner === state.playerNationId ? b.owner : a.owner;
         pushTelegram(
           state,
-          `Escarmouche en route contre ${NATION_TEMPLATES[other].shortName} !`,
-          'warning'
+          `Contact en route : vos troupes s’arrêtent pour affronter ${NATION_TEMPLATES[other].shortName} !`,
+          'warning',
+          a.toProvinceId
         );
       }
+      break;
     }
   }
+}
 
+function tickNavalHazards(state: GameState): void {
   const navalArmies = state.movingArmies.filter(
-    (a) => (a.isNaval || a.isSubmarineMission) && !a.isAir && totalStack(a.units) > 0
+    (a) =>
+      (a.isNaval || a.isSubmarineMission) &&
+      !a.isAir &&
+      !isArmyLockedInFieldBattle(state, a.id) &&
+      totalStack(a.units) > 0
   );
   const movingFrigates = navalArmies.filter((a) => a.units.frigate > 0);
 
@@ -1031,7 +1102,7 @@ function tickArmyEncountersAndNaval(state: GameState): void {
           army.units.light_tank > 0 ||
           army.units.heavy_tank > 0;
         if (hasNormalUnits) {
-          applyDamageToStack(army.units, coastDefLvl * 22);
+          applyDamageToStack(army.units, coastDefLvl * 14, 0.25);
         }
       }
     }
@@ -1045,9 +1116,9 @@ function tickArmyEncountersAndNaval(state: GameState): void {
       if (army.isSubmarineMission) {
         if (!army.detectedBy) army.detectedBy = [];
         if (!army.detectedBy.includes(frigArmy.owner)) army.detectedBy.push(frigArmy.owner);
-        applyDamageToStack(army.units, frigArmy.units.frigate * 38);
+        applyDamageToStack(army.units, frigArmy.units.frigate * 24, 0.3);
       } else if (army.units.frigate === 0) {
-        applyDamageToStack(army.units, frigArmy.units.frigate * 45);
+        applyDamageToStack(army.units, frigArmy.units.frigate * 28, 0.3);
       }
     }
 
@@ -1061,9 +1132,9 @@ function tickArmyEncountersAndNaval(state: GameState): void {
       if (army.isSubmarineMission) {
         if (!army.detectedBy) army.detectedBy = [];
         if (!army.detectedBy.includes(targetProv.owner)) army.detectedBy.push(targetProv.owner);
-        applyDamageToStack(army.units, targetProv.garrison.frigate * 28);
+        applyDamageToStack(army.units, targetProv.garrison.frigate * 20, 0.3);
       } else if (army.units.frigate === 0) {
-        applyDamageToStack(army.units, targetProv.garrison.frigate * 34);
+        applyDamageToStack(army.units, targetProv.garrison.frigate * 24, 0.3);
       }
     }
   }
@@ -1083,6 +1154,7 @@ function autoReturnArmyFromAlly(state: GameState, army: MovingArmy, allyProv: Pr
   const isNaval = !army.isAir && !allyProv.neighbors.includes(destId);
   const dur = getLegDurationSeconds(allyProv, destProv, army.units, isNaval, army.isAir);
 
+  army.clashPos = undefined;
   army.startPos = undefined;
   army.fromProvinceId = allyProv.id;
   army.toProvinceId = destId;
@@ -1109,8 +1181,10 @@ function autoReturnArmyFromAlly(state: GameState, army: MovingArmy, allyProv: Pr
 }
 
 export function tickMovementsAndCombat(state: GameState): void {
+  checkFieldArmyEncounters(state);
+
   if (Math.floor(state.elapsedSeconds) % 3 === 0) {
-    tickArmyEncountersAndNaval(state);
+    tickNavalHazards(state);
   }
 
   const stillMoving: MovingArmy[] = [];
@@ -1118,7 +1192,12 @@ export function tickMovementsAndCombat(state: GameState): void {
   for (const army of state.movingArmies) {
     if (totalStack(army.units) <= 0) continue;
 
-    // 1. Timer actif (débarquement côtier de 5 s ou occupation de 10 s)
+    // L'armée est arrêtée sur place le temps d'une bataille de croisement
+    if (isArmyLockedInFieldBattle(state, army.id)) {
+      stillMoving.push(army);
+      continue;
+    }
+
     if (army.landingStartedAt !== undefined && army.landingEndsAt !== undefined) {
       if (state.elapsedSeconds < army.landingEndsAt) {
         stillMoving.push(army);
@@ -1129,7 +1208,6 @@ export function tickMovementsAndCombat(state: GameState): void {
       army.landingStartedAt = undefined;
       army.landingEndsAt = undefined;
 
-      // Fin du débarquement côtier de 5 s : les unités avancent maintenant vers le centre de la région
       if (army.isSubmarineMission && !army.landingCompleted && targetProv) {
         army.landingCompleted = true;
         const coastPos = getCoastalLandingPos(targetProv, army.startPos);
@@ -1148,7 +1226,6 @@ export function tickMovementsAndCombat(state: GameState): void {
         continue;
       }
 
-      // Fin des 10 s d'occupation sur une province vide : capture définitive
       if (targetProv && targetProv.owner !== army.owner && totalStack(targetProv.garrison) <= 0) {
         captureProvince(state, targetProv, army.owner, army.units);
         continue;
@@ -1161,7 +1238,6 @@ export function tickMovementsAndCombat(state: GameState): void {
     const arrivedProv = state.provinces[army.toProvinceId];
     if (!arrivedProv) continue;
 
-    // 2. Étapes intermédiaires d'un itinéraire multi-provinces
     const hasMoreLegs = army.currentLegIndex + 1 < army.route.length - 1;
     if (hasMoreLegs && arrivedProv.owner === army.owner) {
       army.currentLegIndex += 1;
@@ -1179,13 +1255,11 @@ export function tickMovementsAndCombat(state: GameState): void {
       continue;
     }
 
-    // 3. Arrivée chez soi
     if (arrivedProv.owner === army.owner) {
       addStacks(arrivedProv.garrison, army.units);
       continue;
     }
 
-    // 4. Arrivée chez un allié -> demi-tour automatique
     const status = getDiplomaticStatus(state, army.owner, arrivedProv.owner);
     if (status === 'alliance') {
       autoReturnArmyFromAlly(state, army, arrivedProv);
@@ -1193,7 +1267,6 @@ export function tickMovementsAndCombat(state: GameState): void {
       continue;
     }
 
-    // 5. Arrivée sur la côte en mission de débarquement : arrêt à la côte pendant 5 s
     if (army.isSubmarineMission && !army.landingCompleted) {
       army.landingStartedAt = state.elapsedSeconds;
       army.landingEndsAt = state.elapsedSeconds + GAME_CONFIG.submarineLandingSeconds;
@@ -1218,7 +1291,6 @@ export function tickMovementsAndCombat(state: GameState): void {
 
     const isNavalLanding = army.isNaval && !army.isSubmarineMission && !army.isAir;
 
-    // 6. Province sans garnison : aviation vs occupation/capture de 10 s
     if (totalStack(arrivedProv.garrison) <= 0) {
       if (army.isAir) {
         applySpecialStrikeEffects(state, army.units, arrivedProv, army.owner);
@@ -1243,9 +1315,8 @@ export function tickMovementsAndCombat(state: GameState): void {
       continue;
     }
 
-    // 7. Garnison présente -> engagement d'une bataille active
     const existing = state.battles.find(
-      (b) => b.provinceId === arrivedProv.id && b.attacker === army.owner
+      (b) => !b.isFieldClash && b.provinceId === arrivedProv.id && b.attacker === army.owner
     );
     if (existing) {
       addStacks(existing.attackerUnits, army.units);
@@ -1279,6 +1350,62 @@ export function tickMovementsAndCombat(state: GameState): void {
 
   const ongoingBattles: ActiveBattle[] = [];
   for (const battle of state.battles) {
+    // Cas 1 : bataille de croisement entre deux armées en route
+    if (battle.isFieldClash) {
+      const attArmy = state.movingArmies.find((a) => a.id === battle.attackerArmyId);
+      const defArmy = state.movingArmies.find((a) => a.id === battle.defenderArmyId);
+
+      if (
+        !attArmy ||
+        !defArmy ||
+        totalStack(attArmy.units) <= 0 ||
+        totalStack(defArmy.units) <= 0
+      ) {
+        if (attArmy && totalStack(attArmy.units) > 0) resumeArmyAfterClash(state, attArmy);
+        if (defArmy && totalStack(defArmy.units) > 0) resumeArmyAfterClash(state, defArmy);
+        continue;
+      }
+
+      battle.attackerUnits = attArmy.units;
+      battle.defenderUnits = defArmy.units;
+
+      if (state.elapsedSeconds - battle.lastTickAt < GAME_CONFIG.combatTickSeconds) {
+        ongoingBattles.push(battle);
+        continue;
+      }
+
+      battle.lastTickAt = state.elapsedSeconds;
+
+      const powerA = computeFieldClashPower(state, attArmy.owner, attArmy.units, defArmy.units);
+      const powerB = computeFieldClashPower(state, defArmy.owner, defArmy.units, attArmy.units);
+
+      applyDamageToStack(defArmy.units, powerA * (0.85 + Math.random() * 0.25), 0.34);
+      applyDamageToStack(attArmy.units, powerB * (0.85 + Math.random() * 0.25), 0.34);
+
+      const aAlive = totalStack(attArmy.units) > 0;
+      const bAlive = totalStack(defArmy.units) > 0;
+
+      if (aAlive && bAlive) {
+        ongoingBattles.push(battle);
+      } else {
+        if (aAlive) resumeArmyAfterClash(state, attArmy);
+        if (bAlive) resumeArmyAfterClash(state, defArmy);
+
+        if (attArmy.owner === state.playerNationId || defArmy.owner === state.playerNationId) {
+          pushTelegram(
+            state,
+            aAlive
+              ? `Escarmouche remportée : vos troupes reprennent leur marche.`
+              : `Escarmouche perdue en route.`,
+            aAlive ? 'info' : 'danger',
+            battle.provinceId
+          );
+        }
+      }
+      continue;
+    }
+
+    // Cas 2 : combat de province
     const prov = state.provinces[battle.provinceId];
     if (!prov) continue;
 
@@ -1313,8 +1440,8 @@ export function tickMovementsAndCombat(state: GameState): void {
       false
     );
 
-    applyDamageToStack(prov.garrison, attPower * (0.85 + Math.random() * 0.3));
-    applyDamageToStack(battle.attackerUnits, defPower * (0.85 + Math.random() * 0.3));
+    applyDamageToStack(prov.garrison, attPower * (0.85 + Math.random() * 0.25), 0.35);
+    applyDamageToStack(battle.attackerUnits, defPower * (0.85 + Math.random() * 0.25), 0.35);
     applyDefenseRetaliationDamage(
       state,
       prov,

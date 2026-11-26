@@ -35,6 +35,7 @@ const defenseSpriteCache: Partial<Record<DefenseType, CachedDefenseSprite | 'fai
 
 let cachedSeaNodes: [number, number][] | null = null;
 
+/** Génère un réseau de points de navigation en mer, à distance d'un soldat (~28 px) des côtes */
 function getSeaNavigationNodes(): [number, number][] {
   if (cachedSeaNodes) return cachedSeaNodes;
 
@@ -66,6 +67,7 @@ function getSeaNavigationNodes(): [number, number][] {
   return nodes;
 }
 
+/** Vérifie qu'un segment entre deux points reste en mer (avec marge côtière optionnelle) */
 function isSegmentClearAtSea(
   a: [number, number],
   b: [number, number],
@@ -92,6 +94,40 @@ function isSegmentClearAtSea(
   return true;
 }
 
+/** Vérifie qu'un segment terrestre reste entièrement sur terre (sans traverser la mer) */
+function isSegmentStrictlyOnLand(a: [number, number], b: [number, number]): boolean {
+  const dist = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  const steps = Math.max(4, Math.ceil(dist / 18));
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
+    const px = a[0] + (b[0] - a[0]) * t;
+    const py = a[1] + (b[1] - a[1]) * t;
+    if (!isPointOnLand(px, py)) return false;
+  }
+  return true;
+}
+
+/** Raccourcit une polyligne terrestre en reliant directement les points lorsque le segment reste sur terre */
+function simplifyLandPolyline(pts: [number, number][]): [number, number][] {
+  if (pts.length <= 2) return pts;
+  const result: [number, number][] = [pts[0]];
+  let i = 0;
+
+  while (i < pts.length - 1) {
+    let farthest = i + 1;
+    for (let j = pts.length - 1; j > i + 1; j--) {
+      if (isSegmentStrictlyOnLand(pts[i], pts[j])) {
+        farthest = j;
+        break;
+      }
+    }
+    result.push(pts[farthest]);
+    i = farthest;
+  }
+
+  return result;
+}
+
 function findNearestSeaNode(pt: [number, number], nodes: [number, number][]): [number, number] | null {
   let best: [number, number] | null = null;
   let bestDist = Infinity;
@@ -105,6 +141,7 @@ function findNearestSeaNode(pt: [number, number], nodes: [number, number][]): [n
   return best;
 }
 
+/** Calcule le plus court chemin maritime au large des côtes qui rejoint ensuite exactement la côte cible */
 export function computeSeaPolyline(
   startPt: [number, number],
   endPt: [number, number]
@@ -858,7 +895,7 @@ export function drawMap(
   }
   ctx.restore();
 
-  // Aperçu selon la zone virtuelle (zone MER au large des côtes vs zone TERRE)
+  // Aperçu de trajectoire le plus court dans la zone autorisée (MER au large des côtes ou TERRE)
   if (
     movePreview &&
     (movePreview.route.length >= 2 || (movePreview.startPos && movePreview.route.length >= 1))
@@ -871,10 +908,21 @@ export function drawMap(
       const endPt = movePreview.isSubmarineMission
         ? getCoastalLandingPos(destProv, startPt)
         : destProv.center;
-      const points =
-        movePreview.isSubmarineMission && !movePreview.isAir
-          ? computeSeaPolyline(startPt, endPt)
-          : [startPt, endPt];
+
+      let points: [number, number][];
+      if (movePreview.isSubmarineMission && !movePreview.isAir) {
+        points = computeSeaPolyline(startPt, endPt);
+      } else if (!movePreview.isAir) {
+        const rawLand: [number, number][] = [startPt];
+        for (const id of movePreview.route) {
+          const p = state.provinces[id];
+          if (p) rawLand.push([p.center[0], p.center[1]]);
+        }
+        rawLand.push(endPt);
+        points = simplifyLandPolyline(rawLand);
+      } else {
+        points = [startPt, endPt];
+      }
 
       ctx.save();
       ctx.strokeStyle = movePreview.isSubmarineMission
@@ -963,10 +1011,22 @@ export function drawMap(
         ? getCoastalLandingPos(finalDest, [ax, ay])
         : finalDest.center;
 
-    const linePts =
-      zone === 'MER' && !army.isAir
-        ? computeSeaPolyline([ax, ay], endPt)
-        : [[ax, ay] as [number, number], endPt];
+    let linePts: [number, number][];
+    if (zone === 'MER' && !army.isAir) {
+      linePts = computeSeaPolyline([ax, ay], endPt);
+    } else if (!army.isAir) {
+      const raw: [number, number][] = [[ax, ay]];
+      for (let i = army.currentLegIndex + 1; i < army.route.length; i++) {
+        const wp = state.provinces[army.route[i]];
+        if (wp) raw.push([wp.center[0], wp.center[1]]);
+      }
+      if (Math.hypot(endPt[0] - raw[raw.length - 1][0], endPt[1] - raw[raw.length - 1][1]) > 2) {
+        raw.push(endPt);
+      }
+      linePts = simplifyLandPolyline(raw);
+    } else {
+      linePts = [[ax, ay], endPt];
+    }
 
     ctx.save();
     ctx.strokeStyle =

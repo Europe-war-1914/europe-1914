@@ -53,7 +53,6 @@ export function isFrigateOnlyStack(stack: UnitStack): boolean {
   );
 }
 
-/** Détermine la zone virtuelle courante d'une position ou d'une unité */
 export function getPositionVirtualZone(x: number, y: number): VirtualZone {
   return isPointOnLand(x, y) ? 'TERRE' : 'MER';
 }
@@ -122,7 +121,26 @@ function distBetween(a: Province, b: Province): number {
   return Math.hypot(a.center[0] - b.center[0], a.center[1] - b.center[1]);
 }
 
-/** Calcule l'itinéraire selon les règles de la zone TERRE et de la zone MER */
+/** Vérifie qu'un segment terrestre entre deux centres de provinces ne traverse pas la mer */
+function isLandSegmentValid(a: Province, b: Province): boolean {
+  const steps = Math.max(4, Math.ceil(distBetween(a, b) / 24));
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
+    const px = a.center[0] + (b.center[0] - a.center[0]) * t;
+    const py = a.center[1] + (b.center[1] - a.center[1]) * t;
+    if (!isPointOnLand(px, py)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Calcule la trajectoire la plus courte passant strictement par les zones autorisées :
+ * - Aviation : trajet direct
+ * - Zone MER (navires seuls ou troupes escortées d'un sous-marin / d'une frégate) : uniquement par la mer / côtes
+ * - Zone TERRE (terrestres sans escorte navale) : uniquement par la terre, sans traverser la mer
+ */
 export function computeZoneRoutePlan(
   state: GameState,
   owner: string,
@@ -173,35 +191,40 @@ export function computeZoneRoutePlan(
 
       const candidates: { id: string; weight: number }[] = [];
 
-      // Zone TERRE : interdite aux navires seuls et aux troupes escortées qui naviguent en MER
+      // Zone TERRE : uniquement les voisins terrestres, sans couper par la mer
       if (!requiresSeaZone) {
         for (const nId of curr.neighbors) {
           const nb = state.provinces[nId];
           if (!nb) continue;
           if (nId !== targetId && avoidEnemyIntermediate && nb.owner !== owner) continue;
-          const enemyPenalty = nb.owner !== owner && nId !== targetId ? 140 : 0;
+          if (!isLandSegmentValid(curr, nb)) continue;
+
+          const enemyPenalty = nb.owner !== owner && nId !== targetId ? 180 : 0;
           candidates.push({ id: nId, weight: distBetween(curr, nb) + enemyPenalty });
         }
       }
 
-      // Zone MER : interdite aux unités terrestres sans escorte navale
+      // Zone MER : uniquement pour les unités navales ou escortées, en passant par les liaisons maritimes/côtières
       if (!landWithoutEscort && isCoastalProvince(curr)) {
         const seaSet = new Set(curr.seaNeighbors);
         for (const nId of curr.seaNeighbors) {
           const nb = state.provinces[nId];
           if (!nb || !isCoastalProvince(nb)) continue;
           if (nId !== targetId && avoidEnemyIntermediate && nb.owner !== owner) continue;
-          const enemyPenalty = nb.owner !== owner && nId !== targetId ? 140 : 0;
+
+          const enemyPenalty = nb.owner !== owner && nId !== targetId ? 180 : 0;
           candidates.push({ id: nId, weight: distBetween(curr, nb) * 1.05 + enemyPenalty });
         }
+
         for (const coastId of allCoastalIds) {
           if (coastId === currentId || seaSet.has(coastId)) continue;
           const nb = state.provinces[coastId];
           if (!nb) continue;
           if (coastId !== targetId && avoidEnemyIntermediate && nb.owner !== owner) continue;
+
           const d = distBetween(curr, nb);
           if (d <= 440) {
-            const enemyPenalty = nb.owner !== owner && coastId !== targetId ? 140 : 0;
+            const enemyPenalty = nb.owner !== owner && coastId !== targetId ? 180 : 0;
             candidates.push({ id: coastId, weight: d * 1.15 + enemyPenalty });
           }
         }
@@ -229,6 +252,7 @@ export function computeZoneRoutePlan(
     return route;
   };
 
+  // Pour les unités terrestres sans escorte, on n'autorise jamais la mer même si un chemin contourne des provinces ennemies
   const route = runDijkstra(true) ?? runDijkstra(false);
   if (!route || route.length < 2) return null;
 

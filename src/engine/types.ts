@@ -222,4 +222,6 @@ export interface GameState {
   tutorialStep: number;
   eliminationOrder: PlayableNationId[];
   winnerId: PlayableNationId | null;
+  devMode?: boolean;
+  devPauseAi?: boolean;
 }

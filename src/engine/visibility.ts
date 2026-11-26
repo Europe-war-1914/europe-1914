@@ -1,67 +1,74 @@
 import { getDiplomaticStatus } from './diplomacy';
 import type { GameState, MovingArmy, NationId } from './types';
 
-export function hasIntelOnProvince(state: GameState, provinceId: string): boolean {
-  if (state.fogOfWar === false) return true;
+export function hasIntelOnProvince(
+  state: GameState,
+  provinceId: string,
+  viewerId: NationId = state.playerNationId
+): boolean {
+  if (state.devMode || !state.fogOfWar) return true;
 
   const prov = state.provinces[provinceId];
   if (!prov) return false;
 
-  const player = state.playerNationId;
-
-  if (prov.owner === player || getDiplomaticStatus(state, player, prov.owner) === 'alliance') {
-    return true;
-  }
-
   if (
-    state.battles.some(
-      (b) => b.provinceId === provinceId && (b.attacker === player || b.defender === player)
-    )
-  ) {
-    return true;
-  }
-
-  if (
-    state.movingArmies.some(
-      (m) =>
-        m.owner === player &&
-        (m.fromProvinceId === provinceId ||
-          m.toProvinceId === provinceId ||
-          m.targetProvinceId === provinceId)
-    )
+    prov.owner === viewerId ||
+    getDiplomaticStatus(state, viewerId, prov.owner) === 'alliance'
   ) {
     return true;
   }
 
   const adjacentIds = [...prov.neighbors, ...prov.seaNeighbors];
-  return adjacentIds.some((adjId) => {
+  for (const adjId of adjacentIds) {
     const adj = state.provinces[adjId];
-    if (!adj) return false;
-    return adj.owner === player || getDiplomaticStatus(state, player, adj.owner) === 'alliance';
-  });
+    if (!adj) continue;
+    if (
+      adj.owner === viewerId ||
+      getDiplomaticStatus(state, viewerId, adj.owner) === 'alliance'
+    ) {
+      return true;
+    }
+  }
+
+  const hasFriendlyBattle = state.battles.some(
+    (b) =>
+      b.provinceId === provinceId &&
+      (b.attacker === viewerId ||
+        b.defender === viewerId ||
+        getDiplomaticStatus(state, viewerId, b.attacker) === 'alliance')
+  );
+  if (hasFriendlyBattle) return true;
+
+  return state.movingArmies.some(
+    (a) =>
+      (a.owner === viewerId || getDiplomaticStatus(state, viewerId, a.owner) === 'alliance') &&
+      (a.toProvinceId === provinceId || a.fromProvinceId === provinceId)
+  );
 }
 
-/** Détermine si une armée en mouvement (notamment un sous-marin furtif) est visible pour un observateur */
 export function isMovingArmyVisibleTo(
   state: GameState,
   army: MovingArmy,
-  viewer: NationId
+  viewerId: NationId = state.playerNationId
 ): boolean {
-  if (army.owner === viewer) return true;
-  if (getDiplomaticStatus(state, army.owner, viewer) === 'alliance') return true;
+  if (state.devMode) return true;
 
-  // Sous-marin : invisible sauf débarquement annoncé (10 s) ou détection par Défense marine / Frégate
-  if (army.isSubmarineMission) {
-    if (army.landingStartedAt !== undefined && state.provinces[army.toProvinceId]?.owner === viewer) {
-      return true;
-    }
-    return Boolean(army.detectedBy?.includes(viewer));
+  if (
+    army.owner === viewerId ||
+    getDiplomaticStatus(state, viewerId, army.owner) === 'alliance'
+  ) {
+    return true;
   }
 
-  if (state.fogOfWar === false) return true;
+  if (army.isSubmarineMission) {
+    if (army.landingStartedAt !== undefined) return true;
+    return Boolean(army.detectedBy?.includes(viewerId));
+  }
+
+  if (!state.fogOfWar) return true;
 
   return (
-    hasIntelOnProvince(state, army.fromProvinceId) ||
-    hasIntelOnProvince(state, army.toProvinceId)
+    hasIntelOnProvince(state, army.fromProvinceId, viewerId) ||
+    hasIntelOnProvince(state, army.toProvinceId, viewerId)
   );
 }

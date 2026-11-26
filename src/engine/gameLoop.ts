@@ -57,6 +57,8 @@ export function createNewGame(
     tutorialStep: 1,
     eliminationOrder: [],
     winnerId: null,
+    devMode: false,
+    devPauseAi: false,
   };
 
   pushTelegram(
@@ -173,7 +175,20 @@ export function stepGameState(prevState: GameState, dtRealSeconds: number): Game
   tickEconomy(state, dtRealSeconds);
   tickPendingDiplomacy(state);
   tickMovementsAndCombat(state);
-  tickAI(state);
+
+  if (!state.devPauseAi) {
+    tickAI(state);
+  }
+
+  if (state.devMode) {
+    const player = state.nations[state.playerNationId];
+    if (player && !player.isEliminated) {
+      player.resources.gold = 999999;
+      player.resources.steel = 999999;
+      player.resources.gas = 999999;
+      player.techPoints = Math.max(player.techPoints, 9999);
+    }
+  }
 
   for (const nationId of PLAYABLE_NATIONS) {
     const nation = state.nations[nationId];

@@ -68,20 +68,21 @@ export function MapCanvas({
     () =>
       selectedArmyId
         ? state.movingArmies.find(
-            (a) => a.id === selectedArmyId && a.owner === state.playerNationId
+            (a) => a.id === selectedArmyId && (state.devMode || a.owner === state.playerNationId)
           ) ?? null
         : null,
-    [selectedArmyId, state.movingArmies, state.playerNationId]
+    [selectedArmyId, state.movingArmies, state.playerNationId, state.devMode]
   );
 
   const redirectingArmy = useMemo(
     () =>
       redirectingArmyId
         ? state.movingArmies.find(
-            (a) => a.id === redirectingArmyId && a.owner === state.playerNationId
+            (a) =>
+              a.id === redirectingArmyId && (state.devMode || a.owner === state.playerNationId)
           ) ?? null
         : null,
-    [redirectingArmyId, state.movingArmies, state.playerNationId]
+    [redirectingArmyId, state.movingArmies, state.playerNationId, state.devMode]
   );
 
   const isTargetingMove = Boolean(
@@ -105,8 +106,8 @@ export function MapCanvas({
       const targetProv = state.provinces[hoveredId];
       const isHostile =
         Boolean(targetProv) &&
-        targetProv.owner !== state.playerNationId &&
-        getDiplomaticStatus(state, state.playerNationId, targetProv.owner) !== 'alliance';
+        targetProv.owner !== redirectingArmy.owner &&
+        getDiplomaticStatus(state, redirectingArmy.owner, targetProv.owner) !== 'alliance';
 
       return {
         fromId: redirectingArmy.fromProvinceId,
@@ -129,9 +130,13 @@ export function MapCanvas({
       };
     }
 
+    const actingOwner = state.devMode
+      ? state.provinces[moveOrderFromId]?.owner ?? state.playerNationId
+      : state.playerNationId;
+
     const found = findArmyRoute(
       state,
-      state.playerNationId,
+      actingOwner,
       moveOrderFromId,
       hoveredId,
       moveOrderUnits
@@ -141,8 +146,8 @@ export function MapCanvas({
     const targetProv = state.provinces[hoveredId];
     const isHostile =
       Boolean(targetProv) &&
-      targetProv.owner !== state.playerNationId &&
-      getDiplomaticStatus(state, state.playerNationId, targetProv.owner) !== 'alliance';
+      targetProv.owner !== actingOwner &&
+      getDiplomaticStatus(state, actingOwner, targetProv.owner) !== 'alliance';
 
     return {
       fromId: moveOrderFromId,

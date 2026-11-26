@@ -76,8 +76,10 @@ export function ProvinceDrawer({
     ...province.garrison,
   }));
 
-  const isOwned = province.owner === state.playerNationId;
-  const player = state.nations[state.playerNationId];
+  const isOwned = province.owner === state.playerNationId || Boolean(state.devMode);
+  const actingNationId =
+    state.devMode && province.owner !== 'neutral' ? province.owner : state.playerNationId;
+  const player = state.nations[actingNationId] ?? state.nations[state.playerNationId];
   const ownerTpl = NATION_TEMPLATES[province.owner];
   const intel = hasIntelOnProvince(state, province.id);
   const coastal = isCoastalProvince(province);
@@ -111,7 +113,6 @@ export function ProvinceDrawer({
 
   return (
     <aside className="absolute bottom-3 left-3 z-20 flex max-h-[68dvh] w-[calc(100vw-1.5rem)] max-w-sm flex-col overflow-hidden rounded-lg border border-stone-700 bg-stone-950/96 text-stone-100 shadow-2xl backdrop-blur-sm font-sans">
-      {/* En-tête de la province */}
       <div className="flex items-start justify-between gap-2 border-b border-stone-800 bg-stone-900/90 px-3 py-2.5">
         <div>
           <div className="flex items-center gap-2">
@@ -141,7 +142,6 @@ export function ProvinceDrawer({
         </button>
       </div>
 
-      {/* Vue renseignement si la province n'appartient pas au joueur */}
       {!isOwned ? (
         <div className="overflow-y-auto p-3 space-y-2.5 text-xs">
           {!intel ? (
@@ -208,7 +208,6 @@ export function ProvinceDrawer({
         </div>
       ) : (
         <>
-          {/* Onglets de gestion de la province contrôlée */}
           <div className="grid grid-cols-3 border-b border-stone-800 bg-stone-900/60 text-xs font-semibold">
             <button
               type="button"
@@ -249,7 +248,6 @@ export function ProvinceDrawer({
           </div>
 
           <div className="overflow-y-auto p-3 space-y-2.5 text-xs">
-            {/* ONGLET 1 : ORDRES DE DÉPLACEMENT AU CLIC (0 / 50% / Max + / -) */}
             {tab === 'orders' && (
               <>
                 {totalGarrison === 0 ? (
@@ -381,7 +379,6 @@ export function ProvinceDrawer({
               </>
             )}
 
-            {/* ONGLET 2 : CASERNE (FORMATION DES 8 UNITÉS — VERROU TECHNO NIV. 1) */}
             {tab === 'recruit' && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between rounded border border-stone-800 bg-stone-900/70 px-2.5 py-1.5 text-[11px]">
@@ -396,8 +393,9 @@ export function ProvinceDrawer({
                 {UNIT_ORDER.map((unit) => {
                   const spec = UNIT_SPECS[unit];
                   const needsCoastBlocked = Boolean(spec.requiresCoastal && !coastal);
-                  const techUnlocked = (player.techLevels[spec.armyTechAxis] ?? 0) >= 1;
-                  const affordable = canAfford(player.resources, spec.cost);
+                  const techUnlocked =
+                    Boolean(state.devMode) || (player.techLevels[spec.armyTechAxis] ?? 0) >= 1;
+                  const affordable = Boolean(state.devMode) || canAfford(player.resources, spec.cost);
 
                   return (
                     <div
@@ -446,7 +444,6 @@ export function ProvinceDrawer({
               </div>
             )}
 
-            {/* ONGLET 3 : BÂTIMENTS (CASERNE, LABO UNIQUE, EXTRACTIONS SÉPARÉES, 4 DÉFENSES) */}
             {tab === 'buildings' && (
               <div className="space-y-3">
                 {activeConstruction && (
@@ -458,7 +455,6 @@ export function ProvinceDrawer({
                   </div>
                 )}
 
-                {/* Caserne + Laboratoire unique */}
                 <div className="space-y-1.5">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
                     Infrastructures
@@ -467,7 +463,10 @@ export function ProvinceDrawer({
                   {(() => {
                     const isMax = province.barracksLevel >= 3;
                     const { cost } = getBarracksCost(province.barracksLevel);
-                    const ok = !isMax && !activeConstruction && canAfford(player.resources, cost);
+                    const ok =
+                      !isMax &&
+                      !activeConstruction &&
+                      (Boolean(state.devMode) || canAfford(player.resources, cost));
                     return (
                       <div className="flex items-center justify-between gap-2 rounded border border-stone-800 bg-stone-900/80 p-2">
                         <div>
@@ -500,7 +499,9 @@ export function ProvinceDrawer({
                       const isMax = province.laboratoryLevel >= 3;
                       const { cost } = getLaboratoryCost(province.laboratoryLevel);
                       const ok =
-                        !isMax && !activeConstruction && canAfford(player.resources, cost);
+                        !isMax &&
+                        !activeConstruction &&
+                        (Boolean(state.devMode) || canAfford(player.resources, cost));
                       return (
                         <div className="flex items-center justify-between gap-2 rounded border border-sky-800/60 bg-sky-950/30 p-2">
                           <div>
@@ -531,7 +532,6 @@ export function ProvinceDrawer({
                     })()}
                 </div>
 
-                {/* Usines d'extraction séparées */}
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
@@ -551,13 +551,13 @@ export function ProvinceDrawer({
                     const isMax = cur >= 3;
                     const techAxis = EXTRACTION_TECH_MAP[res];
                     const techLvl = player.techLevels[techAxis];
-                    const techBlocked = !isMax && techLvl < cur + 1;
+                    const techBlocked = !state.devMode && !isMax && techLvl < cur + 1;
                     const { cost } = getExtractionCost(res, cur);
                     const ok =
                       !isMax &&
                       !techBlocked &&
                       !activeConstruction &&
-                      canAfford(player.resources, cost);
+                      (Boolean(state.devMode) || canAfford(player.resources, cost));
 
                     return (
                       <div
@@ -591,7 +591,6 @@ export function ProvinceDrawer({
                   })}
                 </div>
 
-                {/* Défenses améliorables (conditionnées par la techno) */}
                 <div className="space-y-1.5">
                   <p className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-stone-400">
                     <Shield className="h-3 w-3" />
@@ -603,7 +602,7 @@ export function ProvinceDrawer({
                     const isMax = cur >= 3;
                     const coastBlocked = def === 'naval_defense' && !coastal;
                     const techLvl = player.techLevels[def];
-                    const techBlocked = !isMax && techLvl < cur + 1;
+                    const techBlocked = !state.devMode && !isMax && techLvl < cur + 1;
                     const weak = province.activeWeaknesses.find(
                       (w) => w.defense === def && w.expiresAt > state.elapsedSeconds
                     );
@@ -613,7 +612,7 @@ export function ProvinceDrawer({
                       !coastBlocked &&
                       !techBlocked &&
                       !activeConstruction &&
-                      canAfford(player.resources, cost);
+                      (Boolean(state.devMode) || canAfford(player.resources, cost));
 
                     return (
                       <div

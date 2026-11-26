@@ -23,7 +23,7 @@ export interface MoveOrderPreview {
   isHostile: boolean;
 }
 
-const DEF_EXTENSIONS = ['png', 'jpg', 'webp'] as const;
+const DEF_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp'] as const;
 const defenseSpriteCache: Partial<Record<DefenseType, HTMLImageElement | 'failed'>> = {};
 
 function loadDefenseSprite(def: DefenseType, extIndex = 0) {
@@ -92,7 +92,7 @@ export function hitTestMovingArmy(
   state: GameState
 ): MovingArmy | null {
   for (const army of state.movingArmies) {
-    if (army.owner !== state.playerNationId) continue;
+    if (!state.devMode && army.owner !== state.playerNationId) continue;
     const [ax, ay] = getMovingArmyWorldPos(state, army);
     if (Math.hypot(wx - ax, wy - ay) <= 26) {
       return army;

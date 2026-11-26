@@ -32,7 +32,7 @@ type CachedDefenseSprite = {
 
 const defenseSpriteCache: Partial<Record<DefenseType, CachedDefenseSprite | 'failed'>> = {};
 
-/** Détoure automatiquement le fond sombre uniforme des miniatures de défenses */
+/** Détoure automatiquement le fond sombre extérieur des miniatures de défenses */
 function buildCutoutDefenseSprite(img: HTMLImageElement): HTMLCanvasElement | HTMLImageElement {
   try {
     const size = 256;
@@ -68,18 +68,18 @@ function buildCutoutDefenseSprite(img: HTMLImageElement): HTMLCanvasElement | HT
     bgG /= 4;
     bgB /= 4;
 
+    const colorDist = (pixelIdx: number) => {
+      const i = pixelIdx * 4;
+      return Math.hypot(data[i] - bgR, data[i + 1] - bgG, data[i + 2] - bgB);
+    };
+
     const isBackgroundPixel = (pixelIdx: number) => {
       const i = pixelIdx * 4;
       const dr = Math.abs(data[i] - bgR);
       const dg = Math.abs(data[i + 1] - bgG);
       const db = Math.abs(data[i + 2] - bgB);
-      if (dr > 11 || dg > 11 || db > 11) return false;
-      return dr * dr + dg * dg + db * db <= 256;
-    };
-
-    const colorDist = (pixelIdx: number) => {
-      const i = pixelIdx * 4;
-      return Math.hypot(data[i] - bgR, data[i + 1] - bgG, data[i + 2] - bgB);
+      if (dr > 18 || dg > 18 || db > 18) return false;
+      return dr * dr + dg * dg + db * db <= 576;
     };
 
     const totalPixels = size * size;
@@ -130,8 +130,8 @@ function buildCutoutDefenseSprite(img: HTMLImageElement): HTMLCanvasElement | HT
           removed[p + size]
         ) {
           const d = colorDist(p);
-          if (d < 28) {
-            const factor = Math.max(0.25, Math.min(1, (d - 14) / 14));
+          if (d < 36) {
+            const factor = Math.max(0.2, Math.min(1, (d - 18) / 18));
             data[p * 4 + 3] = Math.round(data[p * 4 + 3] * factor);
           }
         }
@@ -300,7 +300,6 @@ function drawDefenseSpriteTile(
   ctx.save();
   ctx.translate(x, y);
 
-  // Halo rouge au sol si la défense est affaiblie
   if (weakened) {
     ctx.strokeStyle = 'rgba(239, 68, 68, 0.85)';
     ctx.lineWidth = 1.6;
@@ -309,7 +308,6 @@ function drawDefenseSpriteTile(
     ctx.stroke();
   }
 
-  // Ombre douce au sol sous la miniature (sans carré)
   ctx.fillStyle = 'rgba(0, 0, 0, 0.38)';
   ctx.beginPath();
   ctx.ellipse(0, 6, 13.5, 4.8, 0, 0, Math.PI * 2);
@@ -348,7 +346,6 @@ function drawDefenseSpriteTile(
     ctx.fillText(labels[def], 0, -0.5);
   }
 
-  // Petite pastille de niveau discrète dans le coin bas droit
   ctx.fillStyle = weakened ? '#991b1b' : 'rgba(12, 11, 10, 0.92)';
   ctx.strokeStyle = weakened ? '#fca5a5' : level >= 3 ? '#d4af37' : '#c2b69e';
   ctx.lineWidth = 0.85;
@@ -494,9 +491,10 @@ function drawBattleEffect(
   prov: Province,
   attCount: number,
   defCount: number,
-  timeSec: number
+  timeSec: number,
+  overridePos?: [number, number]
 ) {
-  const [cx, cy] = prov.center;
+  const [cx, cy] = overridePos ?? prov.center;
   ctx.save();
 
   for (let i = 0; i < 3; i++) {
@@ -824,7 +822,7 @@ export function drawMap(
       owner: army.owner,
       units: army.units,
       facing: to.center[0] >= startX ? 1 : -1,
-      isMoving: landingLeft === undefined,
+      isMoving: landingLeft === undefined && !army.clashPos,
       isNaval: army.isNaval,
       isAir: army.isAir,
       isSubmarine: army.isSubmarineMission,
@@ -832,6 +830,7 @@ export function drawMap(
       isSelected: army.id === selectedArmyId,
       isEnemyWarning: isEnemy,
       landingSecondsLeft: landingLeft,
+      isLandingPhase: Boolean(army.isLandingPhase),
       timeSec,
       scale: 0.94,
     });
@@ -840,12 +839,16 @@ export function drawMap(
   for (const battle of state.battles) {
     const prov = state.provinces[battle.provinceId];
     if (!prov) continue;
+    const defCount = battle.isFieldClash
+      ? totalStack(battle.defenderUnits)
+      : totalStack(prov.garrison);
     drawBattleEffect(
       ctx,
       prov,
       totalStack(battle.attackerUnits),
-      totalStack(prov.garrison),
-      timeSec
+      defCount,
+      timeSec,
+      battle.clashPos
     );
   }
 

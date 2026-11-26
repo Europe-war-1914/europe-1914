@@ -145,6 +145,8 @@ export interface MovingArmy {
   isNaval: boolean;
   isAir: boolean;
   isSubmarineMission: boolean;
+  isLandingPhase?: boolean;
+  isOccupationPhase?: boolean;
   landingStartedAt?: number;
   landingEndsAt?: number;
   landingCompleted?: boolean;

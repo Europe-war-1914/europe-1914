@@ -17,6 +17,7 @@ export interface UnitTokenOptions {
   isCapital?: boolean;
   isEnemyWarning?: boolean;
   landingSecondsLeft?: number;
+  isLandingPhase?: boolean;
   timeSec?: number;
   scale?: number;
 }
@@ -30,7 +31,6 @@ type CachedSprite = {
 
 const spriteCache: Partial<Record<UnitType, CachedSprite | 'failed'>> = {};
 
-/** Détoure proprement le fond uni sombre sans grignoter les ombres de la figurine */
 function buildCutoutSprite(img: HTMLImageElement): HTMLCanvasElement | HTMLImageElement {
   try {
     const size = 256;
@@ -44,7 +44,6 @@ function buildCutoutSprite(img: HTMLImageElement): HTMLCanvasElement | HTMLImage
     const imgData = wctx.getImageData(0, 0, size, size);
     const data = imgData.data;
 
-    // Si l'image a déjà de la transparence dans les coins, on la garde telle quelle
     const corners = [
       0,
       (size - 1) * 4,
@@ -55,7 +54,6 @@ function buildCutoutSprite(img: HTMLImageElement): HTMLCanvasElement | HTMLImage
       return img;
     }
 
-    // Couleur moyenne du fond à partir des 4 coins
     let bgR = 0;
     let bgG = 0;
     let bgB = 0;
@@ -74,7 +72,7 @@ function buildCutoutSprite(img: HTMLImageElement): HTMLCanvasElement | HTMLImage
       const dg = Math.abs(data[i + 1] - bgG);
       const db = Math.abs(data[i + 2] - bgB);
       if (dr > 11 || dg > 11 || db > 11) return false;
-      return dr * dr + dg * dg + db * db <= 256; // distance <= 16
+      return dr * dr + dg * dg + db * db <= 256;
     };
 
     const colorDist = (pixelIdx: number) => {
@@ -82,7 +80,6 @@ function buildCutoutSprite(img: HTMLImageElement): HTMLCanvasElement | HTMLImage
       return Math.hypot(data[i] - bgR, data[i + 1] - bgG, data[i + 2] - bgB);
     };
 
-    // Flood-fill strict depuis les bords extérieurs uniquement
     const totalPixels = size * size;
     const visited = new Uint8Array(totalPixels);
     const removed = new Uint8Array(totalPixels);
@@ -120,7 +117,6 @@ function buildCutoutSprite(img: HTMLImageElement): HTMLCanvasElement | HTMLImage
       if (y < size - 1) tryEnqueue(p + size);
     }
 
-    // Adoucissement très léger uniquement sur le contour immédiat (1 px)
     for (let y = 1; y < size - 1; y++) {
       for (let x = 1; x < size - 1; x++) {
         const p = y * size + x;
@@ -142,7 +138,6 @@ function buildCutoutSprite(img: HTMLImageElement): HTMLCanvasElement | HTMLImage
 
     wctx.putImageData(imgData, 0, 0);
 
-    // Recadrage serré autour de la figurine détourée
     let minX = size;
     let minY = size;
     let maxX = 0;
@@ -371,6 +366,7 @@ export function drawUnitToken(ctx: CanvasRenderingContext2D, opts: UnitTokenOpti
     isCapital = false,
     isEnemyWarning = false,
     landingSecondsLeft,
+    isLandingPhase = false,
     timeSec = 0,
     scale = 1,
   } = opts;
@@ -388,7 +384,6 @@ export function drawUnitToken(ctx: CanvasRenderingContext2D, opts: UnitTokenOpti
     ctx.globalAlpha = 0.82;
   }
 
-  // Anneau au sol si sélectionné / alerte ennemie / débarquement
   if (isSelected || isEnemyWarning || landingSecondsLeft !== undefined) {
     const pulse = 0.65 + 0.35 * Math.sin(timeSec * 7);
     ctx.strokeStyle =
@@ -401,13 +396,11 @@ export function drawUnitToken(ctx: CanvasRenderingContext2D, opts: UnitTokenOpti
     ctx.stroke();
   }
 
-  // Ombre douce au sol sous la figurine (sans carré)
   ctx.fillStyle = 'rgba(0, 0, 0, 0.42)';
   ctx.beginPath();
   ctx.ellipse(0, 7, 17, 5.8, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // Figurine détourée posée directement sur la carte
   if (sprite) {
     const sw = sprite instanceof HTMLImageElement ? sprite.naturalWidth : sprite.width;
     const sh = sprite instanceof HTMLImageElement ? sprite.naturalHeight : sprite.height;
@@ -425,7 +418,6 @@ export function drawUnitToken(ctx: CanvasRenderingContext2D, opts: UnitTokenOpti
     drawTacticalFallback(ctx, dominant, tpl.color);
   }
 
-  // Petit drapeau + pastille compacte d'effectif sous la figurine
   const label = isReturning ? `↩${total}` : String(total);
   const pillW = Math.max(20, label.length * 6.2 + 9);
   const pillH = 12;
@@ -452,12 +444,13 @@ export function drawUnitToken(ctx: CanvasRenderingContext2D, opts: UnitTokenOpti
   ctx.fillText(label, pillX + pillW / 2, badgeY + pillH / 2 + 0.4);
 
   if (landingSecondsLeft !== undefined && landingSecondsLeft > 0) {
-    const alertText = `DÉBARQ. ${Math.ceil(landingSecondsLeft)}s`;
-    ctx.fillStyle = 'rgba(127, 29, 29, 0.96)';
-    ctx.strokeStyle = '#fca5a5';
+    const sec = Math.ceil(landingSecondsLeft);
+    const alertText = isLandingPhase ? `DÉBARQ. ${sec}s` : `ANNEXION ${sec}s`;
+    ctx.fillStyle = isLandingPhase ? 'rgba(127, 29, 29, 0.96)' : 'rgba(120, 53, 15, 0.96)';
+    ctx.strokeStyle = isLandingPhase ? '#fca5a5' : '#fcd34d';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.roundRect(-36, -34, 72, 13, 2.5);
+    ctx.roundRect(-40, -34, 80, 13, 2.5);
     ctx.fill();
     ctx.stroke();
 

@@ -30,6 +30,7 @@ import type {
   ExtractionResource,
   GamePhase,
   GameState,
+  NationId,
   PlayableNationId,
   TechAxis,
   UnitStack,
@@ -72,6 +73,19 @@ function getClientToken(): string {
     window.sessionStorage.setItem(CLIENT_TOKEN_KEY, token);
   }
   return token;
+}
+
+function prepareDevNation(draft: GameState, owner: NationId): void {
+  if (!draft.devMode || owner === 'neutral') return;
+  const nation = draft.nations[owner];
+  if (!nation) return;
+  nation.resources.gold = 999999;
+  nation.resources.steel = 999999;
+  nation.resources.gas = 999999;
+  nation.techPoints = Math.max(nation.techPoints, 9999);
+  (Object.keys(nation.techLevels) as TechAxis[]).forEach((axis) => {
+    nation.techLevels[axis] = 3;
+  });
 }
 
 export default function App() {
@@ -120,6 +134,7 @@ export default function App() {
   const hasCenteredOnlineRef = useRef<boolean>(false);
 
   const isSoloActive = state !== null && !isOnlineMatch;
+  const canUseDevMode = !isOnlineMatch && Boolean(profile?.is_commander);
   const shouldConnectSocket =
     lobbyTab === 'online' || isOnlineMatch || Boolean(window.sessionStorage.getItem(ACTIVE_ROOM_KEY));
 
@@ -860,6 +875,84 @@ export default function App() {
         onReturnToLobby={handleReturnToLobby}
       />
 
+      {canUseDevMode && (
+        <div className="fixed right-3 top-16 z-30 flex flex-col gap-1.5 rounded-lg border border-amber-400/50 bg-stone-950/92 p-2 text-[11px] text-amber-100 shadow-2xl backdrop-blur-sm font-sans">
+          <button
+            type="button"
+            onClick={() => {
+              setState((prev) => {
+                if (!prev) return prev;
+                const next = cloneGameState(prev);
+                next.devMode = !next.devMode;
+                if (!next.devMode) {
+                  next.devPauseAi = false;
+                } else {
+                  const p = next.nations[next.playerNationId];
+                  if (p) {
+                    p.resources = { gold: 999999, steel: 999999, gas: 999999 };
+                    p.techPoints = 9999;
+                  }
+                }
+                return next;
+              });
+              soundEngine.playSelect();
+            }}
+            className={`rounded px-2.5 py-1 font-bold transition ${
+              state.devMode
+                ? 'bg-amber-500 text-stone-950'
+                : 'border border-amber-400/40 bg-stone-900 text-amber-200 hover:bg-stone-800'
+            }`}
+          >
+            👑 Mode Dév : {state.devMode ? 'ACTIF' : 'OFF'}
+          </button>
+
+          {state.devMode && (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setState((prev) => {
+                    if (!prev) return prev;
+                    const next = cloneGameState(prev);
+                    next.devPauseAi = !next.devPauseAi;
+                    return next;
+                  });
+                  soundEngine.playSelect();
+                }}
+                className={`rounded border px-2 py-1 font-semibold ${
+                  state.devPauseAi
+                    ? 'border-emerald-500/60 bg-emerald-950/70 text-emerald-200'
+                    : 'border-stone-700 bg-stone-900 text-stone-300 hover:bg-stone-800'
+                }`}
+              >
+                IA : {state.devPauseAi ? 'EN PAUSE' : 'ACTIVE'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setState((prev) => {
+                    if (!prev) return prev;
+                    const next = cloneGameState(prev);
+                    const p = next.nations[next.playerNationId];
+                    if (p) {
+                      (Object.keys(p.techLevels) as TechAxis[]).forEach((axis) => {
+                        p.techLevels[axis] = 3;
+                      });
+                    }
+                    return next;
+                  });
+                  soundEngine.playBuild();
+                }}
+                className="rounded border border-sky-500/50 bg-sky-950/70 px-2 py-1 font-semibold text-sky-200 hover:bg-sky-900/70"
+              >
+                Technos Niv. 3
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       {toast && (
         <div className="absolute bottom-5 left-1/2 z-30 -translate-x-1/2 rounded-md border border-red-400/60 bg-red-950/95 px-4 py-2 text-xs font-semibold text-red-100 shadow-xl font-sans">
           {toast}
@@ -878,7 +971,12 @@ export default function App() {
             setMoveOrder(null);
             dispatchGameAction(
               { type: 'move', fromId, targetId, units },
-              (draft) => orderMoveArmy(draft, draft.playerNationId, fromId, targetId, units),
+              (draft) => {
+                const owner = draft.devMode
+                  ? draft.provinces[fromId]?.owner ?? draft.playerNationId
+                  : draft.playerNationId;
+                return orderMoveArmy(draft, owner, fromId, targetId, units);
+              },
               () => soundEngine.playMarch()
             );
           }}
@@ -886,14 +984,24 @@ export default function App() {
           onTurnAroundArmy={(armyId) =>
             dispatchGameAction(
               { type: 'turnAround', armyId },
-              (draft) => orderTurnAround(draft, draft.playerNationId, armyId),
+              (draft) => {
+                const targetArmy = draft.movingArmies.find((a) => a.id === armyId);
+                const owner =
+                  draft.devMode && targetArmy ? targetArmy.owner : draft.playerNationId;
+                return orderTurnAround(draft, owner, armyId);
+              },
               () => soundEngine.playMarch()
             )
           }
           onRedirectArmy={(armyId, newTargetId) =>
             dispatchGameAction(
               { type: 'redirectArmy', armyId, targetId: newTargetId },
-              (draft) => orderRedirectArmy(draft, draft.playerNationId, armyId, newTargetId),
+              (draft) => {
+                const targetArmy = draft.movingArmies.find((a) => a.id === armyId);
+                const owner =
+                  draft.devMode && targetArmy ? targetArmy.owner : draft.playerNationId;
+                return orderRedirectArmy(draft, owner, armyId, newTargetId);
+              },
               () => soundEngine.playMarch()
             )
           }
@@ -913,35 +1021,65 @@ export default function App() {
           onUpgradeBarracks={(provinceId) =>
             dispatchGameAction(
               { type: 'upgradeBarracks', provinceId },
-              (draft) => upgradeBarracks(draft, draft.playerNationId, provinceId),
+              (draft) => {
+                const owner = draft.devMode
+                  ? draft.provinces[provinceId]?.owner ?? draft.playerNationId
+                  : draft.playerNationId;
+                prepareDevNation(draft, owner);
+                return upgradeBarracks(draft, owner, provinceId);
+              },
               () => soundEngine.playBuild()
             )
           }
           onUpgradeLaboratory={(provinceId) =>
             dispatchGameAction(
               { type: 'upgradeLaboratory', provinceId },
-              (draft) => upgradeLaboratory(draft, draft.playerNationId, provinceId),
+              (draft) => {
+                const owner = draft.devMode
+                  ? draft.provinces[provinceId]?.owner ?? draft.playerNationId
+                  : draft.playerNationId;
+                prepareDevNation(draft, owner);
+                return upgradeLaboratory(draft, owner, provinceId);
+              },
               () => soundEngine.playBuild()
             )
           }
           onUpgradeExtraction={(provinceId, resource: ExtractionResource) =>
             dispatchGameAction(
               { type: 'upgradeExtraction', provinceId, resource },
-              (draft) => upgradeExtractionFactory(draft, draft.playerNationId, provinceId, resource),
+              (draft) => {
+                const owner = draft.devMode
+                  ? draft.provinces[provinceId]?.owner ?? draft.playerNationId
+                  : draft.playerNationId;
+                prepareDevNation(draft, owner);
+                return upgradeExtractionFactory(draft, owner, provinceId, resource);
+              },
               () => soundEngine.playBuild()
             )
           }
           onUpgradeDefense={(provinceId, defense: DefenseType) =>
             dispatchGameAction(
               { type: 'upgradeDefense', provinceId, defense },
-              (draft) => upgradeDefense(draft, draft.playerNationId, provinceId, defense),
+              (draft) => {
+                const owner = draft.devMode
+                  ? draft.provinces[provinceId]?.owner ?? draft.playerNationId
+                  : draft.playerNationId;
+                prepareDevNation(draft, owner);
+                return upgradeDefense(draft, owner, provinceId, defense);
+              },
               () => soundEngine.playBuild()
             )
           }
           onRecruit={(provinceId, unit: UnitType, count: number) =>
             dispatchGameAction(
               { type: 'recruit', provinceId, unit, count },
-              (draft) => startRecruitment(draft, draft.playerNationId, provinceId, unit, count),
+              (draft) => {
+                const owner = draft.devMode
+                  ? draft.provinces[provinceId]?.owner ?? draft.playerNationId
+                  : draft.playerNationId;
+                prepareDevNation(draft, owner);
+                return startRecruitment(draft, owner, provinceId, unit, count);
+              },
               () => soundEngine.playRecruit()
             )
           }
@@ -964,14 +1102,23 @@ export default function App() {
         onTurnAround={(armyId) =>
           dispatchGameAction(
             { type: 'turnAround', armyId },
-            (draft) => orderTurnAround(draft, draft.playerNationId, armyId),
+            (draft) => {
+              const targetArmy = draft.movingArmies.find((a) => a.id === armyId);
+              const owner =
+                draft.devMode && targetArmy ? targetArmy.owner : draft.playerNationId;
+              return orderTurnAround(draft, owner, armyId);
+            },
             () => soundEngine.playMarch()
           )
         }
         onRetreat={(battleId) =>
           dispatchGameAction(
             { type: 'retreat', battleId },
-            (draft) => retreatFromBattle(draft, battleId, draft.playerNationId),
+            (draft) => {
+              const battle = draft.battles.find((b) => b.id === battleId);
+              const owner = draft.devMode && battle ? battle.attacker : draft.playerNationId;
+              return retreatFromBattle(draft, battleId, owner);
+            },
             () => soundEngine.playMarch()
           )
         }

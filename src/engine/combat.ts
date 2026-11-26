@@ -168,7 +168,7 @@ export function getLegDurationSeconds(
 /**
  * Calcule le plus court chemin valide :
  * - Aviation : trajet direct
- * - Unités navales (ou troupes escortées d'un sous-marin / d'une frégate) : uniquement par la mer / côtes
+ * - Unités navales (ou troupes escortées d'un sous-marin / d'une frégate) : liaisons maritimes / côtières
  * - Terrestre sans escorte navale : uniquement par terre en évitant la mer et les territoires ennemis si possible
  */
 export function findArmyRoute(
@@ -211,39 +211,40 @@ export function findArmyRoute(
 
       const curr = state.provinces[currentId];
       if (!curr) continue;
-      if (currentId !== fromId && avoidEnemyIntermediate && curr.owner !== owner) continue;
 
       const candidates: { id: string; weight: number }[] = [];
 
-      // Terre : interdit aux frégates et aux unités terrestres sans escorte si la mer est nécessaire
+      // Terre : interdit aux frégates et aux unités terrestres qui utilisent l'escorte maritime
       if (!navalOnly && !escortNaval) {
         for (const nId of curr.neighbors) {
           const nb = state.provinces[nId];
           if (!nb) continue;
           if (nId !== targetId && avoidEnemyIntermediate && nb.owner !== owner) continue;
-          const enemyPenalty = nb.owner !== owner && nId !== targetId ? 240 : 0;
+          const enemyPenalty = nb.owner !== owner && nId !== targetId ? 140 : 0;
           candidates.push({ id: nId, weight: distBetween(curr, nb) + enemyPenalty });
         }
       }
 
-      // Mer / côtes : autorisé pour les unités navales ou les troupes escortées d'un sous-marin / frégate
+      // Mer / côtes : interdit aux unités terrestres sans escorte navale
       if (!landNeedsEscort && isCoastalProvince(curr)) {
         const seaSet = new Set(curr.seaNeighbors);
         for (const nId of curr.seaNeighbors) {
           const nb = state.provinces[nId];
           if (!nb || !isCoastalProvince(nb)) continue;
           if (nId !== targetId && avoidEnemyIntermediate && nb.owner !== owner) continue;
-          const enemyPenalty = nb.owner !== owner && nId !== targetId ? 240 : 0;
+          const enemyPenalty = nb.owner !== owner && nId !== targetId ? 140 : 0;
           candidates.push({ id: nId, weight: distBetween(curr, nb) * 1.05 + enemyPenalty });
         }
         for (const coastId of allCoastalIds) {
           if (coastId === currentId || seaSet.has(coastId)) continue;
           const nb = state.provinces[coastId];
           if (!nb) continue;
-          if (coastId !== targetId && avoidEnemyIntermediate && nb.owner !== owner) continue;
+          if (coastId !== targetId && avoidEnemyIntermediate && nb.owner !== owner) {
+            continue;
+          }
           const d = distBetween(curr, nb);
-          if (d <= 420) {
-            const enemyPenalty = nb.owner !== owner && coastId !== targetId ? 240 : 0;
+          if (d <= 440) {
+            const enemyPenalty = nb.owner !== owner && coastId !== targetId ? 140 : 0;
             candidates.push({ id: coastId, weight: d * 1.15 + enemyPenalty });
           }
         }
@@ -271,8 +272,7 @@ export function findArmyRoute(
     return route;
   };
 
-  // Pour les unités terrestres sans escorte navale, on interdit strictement la mer même en fallback
-  const route = runDijkstra(true) ?? (landNeedsEscort ? null : runDijkstra(false));
+  const route = runDijkstra(true) ?? runDijkstra(false);
   if (!route || route.length < 2) return null;
 
   const isSubmarineMission =
@@ -996,7 +996,6 @@ function captureProvince(
   }
 }
 
-/** Détecte quand 2 armées ennemies se croisent : les arrête et ouvre une bataille de campagne dédiée */
 function checkFieldArmyEncounters(state: GameState): void {
   for (let i = 0; i < state.movingArmies.length; i++) {
     const a = state.movingArmies[i];
@@ -1186,7 +1185,6 @@ function autoReturnArmyFromAlly(state: GameState, army: MovingArmy, allyProv: Pr
   }
 }
 
-/** Après un débarquement côtier : les unités avancent de la côte vers la destination et le sous-marin rentre à sa base */
 function finishSubmarineLanding(
   state: GameState,
   army: MovingArmy,
@@ -1204,7 +1202,6 @@ function finishSubmarineLanding(
     }
   }
 
-  // 1. Les unités débarquées partent de la côte et marchent progressivement (sans téléportation)
   if (totalStack(landedUnits) > 0) {
     const walkDur = getLegDurationFromPos(
       coastPos,
@@ -1238,7 +1235,6 @@ function finishSubmarineLanding(
     });
   }
 
-  // 2. Le sous-marin rentre à sa base d'origine par la mer
   if (subCount > 0) {
     const baseId =
       state.provinces[army.originProvinceId]?.owner === army.owner
@@ -1250,7 +1246,8 @@ function finishSubmarineLanding(
       const subStack = createEmptyStack();
       subStack.submarine = subCount;
       const foundSea = findArmyRoute(state, army.owner, targetProv.id, baseId, subStack);
-      const seaRoute = foundSea?.route && foundSea.route.length >= 2 ? foundSea.route : [targetProv.id, baseId];
+      const seaRoute =
+        foundSea?.route && foundSea.route.length >= 2 ? foundSea.route : [targetProv.id, baseId];
       const nextStopId = seaRoute[1];
       const nextStopProv = state.provinces[nextStopId] ?? baseProv;
       const retDur = getLegDurationFromPos(coastPos, nextStopProv.center, subStack, true, false, 7);
@@ -1326,6 +1323,7 @@ export function tickMovementsAndCombat(state: GameState): void {
       if (
         wasOccupation &&
         targetProv &&
+        targetProv.id === army.targetProvinceId &&
         targetProv.owner !== army.owner &&
         totalStack(targetProv.garrison) <= 0
       ) {
@@ -1340,8 +1338,10 @@ export function tickMovementsAndCombat(state: GameState): void {
     const arrivedProv = state.provinces[army.toProvinceId];
     if (!arrivedProv) continue;
 
-    const hasMoreLegs = army.currentLegIndex + 1 < army.route.length - 1;
-    if (hasMoreLegs && (arrivedProv.owner === army.owner || army.isNaval || army.isReturning)) {
+    const isFinalDestination = arrivedProv.id === army.targetProvinceId;
+    const hasMoreLegs = !isFinalDestination && army.currentLegIndex + 1 < army.route.length - 1;
+
+    if (hasMoreLegs) {
       army.currentLegIndex += 1;
       army.startPos = undefined;
       army.fromProvinceId = army.route[army.currentLegIndex];
@@ -1357,6 +1357,28 @@ export function tickMovementsAndCombat(state: GameState): void {
       continue;
     }
 
+    if (!isFinalDestination && army.targetProvinceId) {
+      const finalProv = state.provinces[army.targetProvinceId];
+      if (finalProv) {
+        army.startPos = undefined;
+        army.fromProvinceId = arrivedProv.id;
+        army.toProvinceId = finalProv.id;
+        army.route = [arrivedProv.id, finalProv.id];
+        army.currentLegIndex = 0;
+        const dur = getLegDurationSeconds(
+          arrivedProv,
+          finalProv,
+          army.units,
+          army.isNaval,
+          army.isAir
+        );
+        army.legStartedAt = state.elapsedSeconds;
+        army.legArrivalAt = state.elapsedSeconds + dur;
+        stillMoving.push(army);
+        continue;
+      }
+    }
+
     if (arrivedProv.owner === army.owner) {
       addStacks(arrivedProv.garrison, army.units);
       continue;
@@ -1369,7 +1391,6 @@ export function tickMovementsAndCombat(state: GameState): void {
       continue;
     }
 
-    // Débarquement côtier de 5 s pour une mission sous-marine
     if (army.isSubmarineMission && !army.landingCompleted) {
       army.isLandingPhase = true;
       army.isOccupationPhase = false;
@@ -1399,7 +1420,6 @@ export function tickMovementsAndCombat(state: GameState): void {
       !hasLandUnits(army.units) &&
       (army.units.submarine ?? 0) === 0;
 
-    // Les frégates ne vont jamais sur la terre : elles tirent depuis la côte et retournent en mer/base
     if (isFrigateOnly) {
       applySpecialStrikeEffects(state, army.units, arrivedProv, army.owner);
       applyDefenseRetaliationDamage(state, arrivedProv, army.units, true);
@@ -1421,7 +1441,6 @@ export function tickMovementsAndCombat(state: GameState): void {
           stillMoving.push(army);
         }
       } else {
-        // Occupation / annexion de 10 s sur province vide (sans le mot débarquement)
         army.isLandingPhase = false;
         army.isOccupationPhase = true;
         army.landingStartedAt = state.elapsedSeconds;
@@ -1474,7 +1493,6 @@ export function tickMovementsAndCombat(state: GameState): void {
 
   const ongoingBattles: ActiveBattle[] = [];
   for (const battle of state.battles) {
-    // 1. Bataille de croisement entre deux armées en route
     if (battle.isFieldClash) {
       const attArmy = state.movingArmies.find((a) => a.id === battle.attackerArmyId);
       const defArmy = state.movingArmies.find((a) => a.id === battle.defenderArmyId);
@@ -1531,7 +1549,6 @@ export function tickMovementsAndCombat(state: GameState): void {
       continue;
     }
 
-    // 2. Combat de province
     const prov = state.provinces[battle.provinceId];
     if (!prov) continue;
 
@@ -1636,7 +1653,6 @@ function applySpecialStrikeEffects(
       }
     }
 
-    // Les bombardiers n'affaiblissent jamais les défenses anti-aériennes (aa_defense)
     const allowedDefs: DefenseType[] = ['trenches', 'bunkers', 'naval_defense'];
     for (const def of allowedDefs) {
       if (targetProv.defenses[def] > 0 && Math.random() < 0.45) {
@@ -1645,7 +1661,6 @@ function applySpecialStrikeEffects(
     }
   }
 
-  // Les frégates n'affaiblissent jamais les défenses anti-marines (naval_defense)
   if ((attackerUnits.frigate ?? 0) > 0 && isCoastalProvince(targetProv)) {
     const allowedDefs: DefenseType[] = ['trenches', 'bunkers', 'aa_defense'];
     for (const def of allowedDefs) {
